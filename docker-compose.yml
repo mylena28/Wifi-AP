@@ -1,0 +1,10 @@
+services:
+  gallery:
+    build: .
+    container_name: gallery
+    restart: always
+    network_mode: host        # binds directly to host IP (192.168.50.1:8080)
+    volumes:
+      - ${IMAGE_DIR:-/home/pi/capturas}:/data:ro
+    environment:
+      - IMAGE_DIR=/data

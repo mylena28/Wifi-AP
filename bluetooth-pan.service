@@ -1,0 +1,35 @@
+[Unit]
+Description=Bluetooth PAN Network Access Point
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+
+# create pan0 bridge (ignore error if it already exists)
+-ExecStartPre=/bin/bash -c 'ip link show pan0 &>/dev/null && ip link delete pan0 type bridge'
+ExecStartPre=/usr/bin/ip link add name pan0 type bridge
+ExecStartPre=/usr/bin/ip link set pan0 up
+ExecStartPre=/usr/bin/ip addr add 192.168.50.1/24 dev pan0
+
+# start DHCP server on pan0
+ExecStartPre=/bin/systemctl start dnsmasq
+
+# make Pi discoverable and pairable
+ExecStartPre=/usr/bin/bluetoothctl power on
+ExecStartPre=/usr/bin/bluetoothctl discoverable on
+ExecStartPre=/usr/bin/bluetoothctl pairable on
+
+# main process — Bluetooth NAP server
+ExecStart=/usr/bin/bt-network -s nap pan0
+
+# cleanup on stop
+ExecStop=/bin/systemctl stop dnsmasq
+ExecStop=/usr/bin/bluetoothctl discoverable off
+ExecStop=/bin/bash -c 'ip link set pan0 down && ip link delete pan0 type bridge || true'
+
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
