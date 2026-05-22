@@ -20,7 +20,7 @@ fi
 
 echo "=== [1/5] Installing Bluetooth PAN dependencies ==="
 apt update
-apt install -y bluez bluez-tools dnsmasq
+apt install -y bluez bluez-tools dnsmasq tcpdump
 
 echo "=== [2/5] Writing .env for Docker ==="
 echo "IMAGE_DIR=$IMAGE_DIR" > "$SCRIPT_DIR/.env"
@@ -42,6 +42,8 @@ systemctl stop dnsmasq 2>/dev/null || true
 echo "=== [5/5] Starting services ==="
 systemctl enable bluetooth
 systemctl restart bluetooth
+# remove leftover pan0 before starting (avoids "already exists" error)
+ip link set pan0 down 2>/dev/null; ip link delete pan0 2>/dev/null; true
 systemctl start bluetooth-pan.service
 docker compose up -d
 

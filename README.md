@@ -73,31 +73,52 @@ sudo ./setup_pi.sh /path/to/your/images/folder
 
 ### 1.3 Pair your phone with the Pi (first time only)
 
-On the Pi, open bluetoothctl:
+> The Pi initiates the pairing — more reliable than waiting for the phone to trigger it.
+
+**Step 1 — On the Pi**, open bluetoothctl:
 
 ```bash
 sudo bluetoothctl
 ```
 
-Inside the prompt:
+Run these commands one at a time:
 
 ```
 power on
-agent NoInputNoOutput
+agent on
 default-agent
-discoverable on
-pairable on
+scan on
 ```
 
-On your **phone**: Settings → Bluetooth → scan → tap **raspberrypi**.
-Accept the pairing on the phone. Back on the Pi you will see the phone's MAC address appear. Run:
+**Step 2 — On the phone**: open Settings → Bluetooth and leave the screen open
+(this makes the phone visible to the Pi for a few seconds).
+
+**Step 3 — Back on the Pi**: wait until the phone's MAC address appears in the output:
 
 ```
-trust <PHONE_MAC_ADDRESS>
+[NEW] Device AA:BB:CC:DD:EE:FF My Phone Name
+```
+
+Then run:
+
+```
+scan off
+pair AA:BB:CC:DD:EE:FF
+```
+
+A **numeric code** will appear on both the Pi terminal and the phone.
+Confirm on the phone. The Pi accepts automatically.
+
+**Step 4 — Trust the phone** so it reconnects without approval on future boots:
+
+```
+trust AA:BB:CC:DD:EE:FF
 exit
 ```
 
-> After `trust`, the phone connects automatically on every subsequent boot — no approval needed on the Pi.
+> If the phone does not appear after 30 seconds, toggle Bluetooth off and on on the phone and try `scan on` again.
+
+> After `trust`, on every subsequent boot the phone connects automatically — no interaction needed on the Pi.
 
 ---
 
