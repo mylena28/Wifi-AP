@@ -1,69 +1,100 @@
 # Status do Projeto — AppInstalacao (Bluetooth PAN + Flask Gallery)
 
-**Última atualização:** 2026-05-20  
+**Última atualização:** 2026-06-12  
 **Objetivo:** Acessar imagens do Raspberry Pi 5 pelo celular via Bluetooth, sem internet/Wi-Fi.
 
 ---
 
-## O que está funcionando
+## O que está funcionando (confirmado em 2026-05-27)
 
 | Componente | Status |
 |---|---|
-| `bluetooth-pan.service` | Rodando — `bt-network NAP server registered` |
-| `pan0` interface | UP, IP `192.168.50.1/24` |
-| `bnep0` (conexão BT do celular) | Sendo criado e bridgeado no `pan0` quando "Internet access" ativado |
-| Docker `gallery` container | Rodando — Flask respondendo em `0.0.0.0:8080` |
-| Flask acessível do próprio Pi | Sim — `curl http://192.168.50.1:8080` retorna HTML |
+| `bluetooth-pan.service` | Rodando com configs novas |
+| `pan0` interface | UP, IP `192.168.50.1/24` + IPv6 `fd00::1/64` |
+| `bnep0` (conexão BT do celular) | Criado e bridgeado no `pan0` quando "Acesso à internet" ativado |
+| Docker `gallery` container | Rodando — Flask em `[::]:8080` (IPv4 + IPv6) |
+| Flask acessível do Pi via IPv4 | `curl http://192.168.50.1:8080` retorna HTML |
+| Flask acessível do Pi via IPv6 | `curl -6 http://[fd00::1]:8080` retorna HTML |
+| dnsmasq enviando Router Advertisements | Confirmado — celular recebe RA e configura `fd00::eeed:73ff:fe7a:4731` via SLAAC |
 
 ---
 
-## Problema atual — celular não recebe IP via DHCP
+## Causa raiz identificada — Docker bloqueando ip6tables/iptables
 
-- `dnsmasq` está rodando mas o arquivo `/var/lib/misc/dnsmasq.leases` permanece vazio
-- `bnep0` aparece na bridge mas `tcpdump -i any port 67 or port 68` não captura nenhum pacote DHCP
-- O celular ativa "Internet access" no Bluetooth mas o browser não consegue acessar `http://192.168.50.1:8080`
+O Docker (rodando em `network_mode: host`) seta a policy `DROP` no chain `FORWARD` do
+`ip6tables` e do `iptables`, e adiciona uma regra `DROP` catch-all no final da chain. Como
+resultado, pacotes vindos do celular via `pan0` são descartados antes de chegar ao Flask.
+
+O `sysctl bridge-nf-call-ip6tables=0` do serviço não é suficiente quando o Docker sobe depois
+e reabilita o `br_netfilter` ou adiciona suas próprias regras.
+
+### Correção aplicada (2026-06-12)
+
+Adicionadas regras `ACCEPT` explícitas para `pan0` no início das chains INPUT e FORWARD,
+tanto no `bluetooth-pan.service` quanto no `start_server.sh`:
+
+```
+ip6tables -I INPUT  -i pan0 -j ACCEPT
+ip6tables -I FORWARD -i pan0 -j ACCEPT
+iptables  -I INPUT  -i pan0 -j ACCEPT
+iptables  -I FORWARD -i pan0 -j ACCEPT
+```
+
+Inserir no topo (`-I`) garante que a regra ACCEPT fica antes de qualquer DROP do Docker,
+que é sempre adicionado com `-A` (append, no final).
+
+As regras são removidas no `ExecStop` / `cleanup()`.
 
 ---
 
-## Hipóteses ainda não descartadas
+## Próximo passo — aplicar no Pi e testar
 
-1. **Android não manda DHCP request automaticamente** — o `bnep0` é criado mas o celular pode estar esperando algo antes de solicitar IP
-2. **Filtro na bridge** — `br_netfilter` pode estar bloqueando pacotes antes de chegarem ao dnsmasq (verificar `cat /proc/sys/net/bridge/bridge-nf-call-iptables`)
-3. **dnsmasq não está respondendo ao range correto** — config atual sem `listen-address`, só `interface=pan0`
+```bash
+# No diretório do projeto no Pi:
+sudo cp bluetooth-pan.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart bluetooth-pan.service
+
+# Conectar celular → "Acesso à internet" → abrir no browser:
+#   http://192.168.50.1:8080   (IPv4 — mais simples de digitar)
+#   http://[fd00::1]:8080      (IPv6)
+```
+
+Se ainda não funcionar, verificar o estado das chains:
+```bash
+sudo ip6tables -L INPUT  -n --line-numbers
+sudo ip6tables -L FORWARD -n --line-numbers
+sudo iptables  -L INPUT  -n --line-numbers
+sudo iptables  -L FORWARD -n --line-numbers
+```
 
 ---
 
-## Próximas coisas a tentar
+## Arquivos relevantes
 
-1. `sudo tcpdump -i bnep0 -n` — ver se QUALQUER tráfego chega no bnep0 (sem filtro de porta)
-2. `ip neigh show dev pan0` — ver se o celular aparece na tabela ARP (teria IP link-local)
-3. `cat /proc/sys/net/bridge/bridge-nf-call-iptables` — se for `1`, adicionar regra para permitir DHCP na bridge
-4. Testar atribuir IP estático manualmente ao celular via `adb`:
-   ```bash
-   adb shell ip addr add 192.168.50.2/24 dev bnep0
-   ```
-5. Considerar trocar dnsmasq por `udhcpd` (mais simples para interfaces específicas)
+| Arquivo | Localização no Pi |
+|---|---|
+| Serviço BT | `/etc/systemd/system/bluetooth-pan.service` |
+| Config dnsmasq | `/etc/dnsmasq.d/bluetooth-pan.conf` |
+| Docker | `~/video/PhoneRasp/docker-compose.yml` |
+| Script de diagnóstico | `~/video/PhoneRasp/fix_dnsmasq.sh` |
 
 ---
-
-## Arquivos relevantes no Pi
-
-- Pasta do projeto: `~/video/PhoneRasp/`
-- Serviço BT: `/etc/systemd/system/bluetooth-pan.service`
-- Config DHCP: `/etc/dnsmasq.d/bluetooth-pan.conf`
-- Docker: `~/video/PhoneRasp/docker-compose.yml`
 
 ## Config atual do dnsmasq no Pi (`/etc/dnsmasq.d/bluetooth-pan.conf`)
 
 ```
 interface=pan0
-bind-interfaces
 dhcp-range=192.168.50.2,192.168.50.20,255.255.255.0,24h
 dhcp-option=3,192.168.50.1
+dhcp-authoritative
+dhcp-broadcast
+dhcp-range=::1,::ffff,constructor:pan0,ra-only,64,24h
 ```
 
 ---
 
 ## MAC do celular
 
-`EC:ED:73:7A:47:31`
+`EC:ED:73:7A:47:31`  
+IPv6 SLAAC configurado: `fd00::eeed:73ff:fe7a:4731`

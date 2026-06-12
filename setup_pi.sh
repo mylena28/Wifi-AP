@@ -22,6 +22,15 @@ echo "=== [1/5] Installing Bluetooth PAN dependencies ==="
 apt update
 apt install -y bluez bluez-tools dnsmasq tcpdump
 
+# Persist bridge-netfilter settings so they survive reboot.
+# br_netfilter routes bridge traffic through iptables; disabling it prevents
+# a default DROP FORWARD policy from blocking DHCP and HTTP on pan0.
+cat > /etc/sysctl.d/10-bridge-nf.conf <<'EOF'
+net.bridge.bridge-nf-call-iptables=0
+net.bridge.bridge-nf-call-ip6tables=0
+EOF
+sysctl --system 2>/dev/null | grep bridge-nf || true
+
 echo "=== [2/5] Writing .env for Docker ==="
 echo "IMAGE_DIR=$IMAGE_DIR" > "$SCRIPT_DIR/.env"
 echo "Written: IMAGE_DIR=$IMAGE_DIR"

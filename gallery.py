@@ -95,4 +95,4 @@ def browse(subpath):
 
 if __name__ == "__main__":
     print(f"[GALLERY] Base folder: {BASE}")
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    app.run(host="::", port=8080, debug=False)

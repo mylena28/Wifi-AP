@@ -28,6 +28,10 @@ cleanup() {
     kill "$BT_NET_PID" 2>/dev/null || true
     kill "$FLASK_PID" 2>/dev/null || true
     systemctl stop dnsmasq 2>/dev/null || true
+    ip6tables -D INPUT  -i pan0 -j ACCEPT 2>/dev/null || true
+    ip6tables -D FORWARD -i pan0 -j ACCEPT 2>/dev/null || true
+    iptables  -D INPUT  -i pan0 -j ACCEPT 2>/dev/null || true
+    iptables  -D FORWARD -i pan0 -j ACCEPT 2>/dev/null || true
     ip link set pan0 down 2>/dev/null || true
     ip link delete pan0 type bridge 2>/dev/null || true
     bluetoothctl discoverable off 2>/dev/null || true
@@ -41,9 +45,20 @@ if ip link show pan0 &>/dev/null; then
     ip link delete pan0 type bridge 2>/dev/null || true
 fi
 ip link add name pan0 type bridge
+# disable STP so bnep0 forwards immediately when the phone connects
+ip link set pan0 type bridge stp_state 0
 ip link set pan0 up
 ip addr add "$PI_IP/24" dev pan0
-echo "[BT-PAN] Interface pan0 ready — IP $PI_IP"
+# prevent br_netfilter from routing bridge frames through iptables FORWARD
+sysctl -w net.bridge.bridge-nf-call-iptables=0 2>/dev/null || true
+sysctl -w net.bridge.bridge-nf-call-ip6tables=0 2>/dev/null || true
+ip -6 addr add fd00::1/64 dev pan0 2>/dev/null || true
+# allow pan0 traffic through iptables regardless of Docker's DROP policy
+ip6tables -C INPUT  -i pan0 -j ACCEPT 2>/dev/null || ip6tables -I INPUT  -i pan0 -j ACCEPT
+ip6tables -C FORWARD -i pan0 -j ACCEPT 2>/dev/null || ip6tables -I FORWARD -i pan0 -j ACCEPT
+iptables  -C INPUT  -i pan0 -j ACCEPT 2>/dev/null || iptables  -I INPUT  -i pan0 -j ACCEPT
+iptables  -C FORWARD -i pan0 -j ACCEPT 2>/dev/null || iptables  -I FORWARD -i pan0 -j ACCEPT
+echo "[BT-PAN] Interface pan0 ready — IP $PI_IP / IPv6 fd00::1"
 
 # --- start dnsmasq for DHCP ---
 echo "[BT-PAN] Starting dnsmasq..."
