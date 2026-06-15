@@ -1,163 +1,113 @@
-# AppInstalacao — Bluetooth PAN + Flask Image Gallery
+# AppInstalacao — Wi-Fi AP + Flask Image Gallery
 
-Browse images from the Raspberry Pi 5 on your phone via Bluetooth.
-No internet or Wi-Fi required. Everything starts automatically on boot.
+Acesse imagens do Raspberry Pi 5 pelo celular via Wi-Fi direto.
+Sem internet, sem roteador. Tudo sobe automaticamente no boot.
 
 ---
 
-## Architecture
+## Arquitetura
 
 ```
-┌─────────────────────────────────────────────┐
+┌──────────────────────────────────────────────┐
 │              Raspberry Pi 5                  │
-│                                             │
-│  [systemd: bluetooth-pan.service]           │
-│    • Creates pan0 interface (192.168.50.1)  │
-│    • Starts dnsmasq (DHCP for phone)        │
-│    • Starts bt-network NAP                  │
-│    • Makes Pi discoverable                  │
-│                                             │
-│  [Docker: gallery container]                │
-│    • Flask image gallery on port 8080       │
-│    • Mounts your image folder (read-only)   │
-│    • restart: always → survives reboots     │
-└─────────────────────────────────────────────┘
-          ▲ Bluetooth PAN
+│                                              │
+│  [systemd: wifi-ap.service]                  │
+│    • Configura wlan0 com IP 192.168.50.1     │
+│    • Sobe hostapd (AP Wi-Fi "PiGaleria")     │
+│    • Sobe dnsmasq (DHCP para o celular)      │
+│    • Redireciona porta 80 → 8080 (iptables)  │
+│                                              │
+│  [Docker: gallery container]                 │
+│    • Flask image gallery na porta 8080       │
+│    • Monta a pasta de imagens (read-only)    │
+│    • restart: always → sobrevive reboots     │
+└──────────────────────────────────────────────┘
+          ▲ Wi-Fi (SSID: PiGaleria)
           │
     ┌─────────┐
-    │  Phone  │  Browser → http://192.168.50.1:8080
+    │  Celular │  Browser → http://192.168.50.1:8080
     └─────────┘
 ```
 
 ---
 
-## Files
+## Arquivos
 
-| File | Purpose |
+| Arquivo | Função |
 |---|---|
-| `setup_pi.sh` | Run **once** — installs deps, builds Docker image, enables services |
-| `bluetooth-pan.service` | systemd unit — manages Bluetooth PAN on the host |
-| `dnsmasq_pan.conf` | DHCP config for the `pan0` interface |
-| `docker-compose.yml` | Docker service definition for the Flask gallery |
-| `Dockerfile` | Python + Flask image |
-| `gallery.py` | Flask image gallery source |
-| `.env.example` | Template for image folder config (copied to `.env` by setup) |
-| `start_server.sh` | Manual/debug fallback — not needed for normal use |
+| `setup_pi.sh` | Roda **uma vez** — instala dependências, build Docker, ativa serviços |
+| `wifi-ap.service` | Serviço systemd — gerencia o AP Wi-Fi e o roteamento |
+| `hostapd.conf` | Configuração do AP Wi-Fi (SSID, senha, canal) |
+| `dnsmasq_wifi.conf` | DHCP para a interface `wlan0` |
+| `docker-compose.yml` | Definição do serviço Docker da galeria |
+| `Dockerfile` | Imagem Python + Flask |
+| `gallery.py` | Código-fonte da galeria Flask |
+| `.env.example` | Template da pasta de imagens (copiado para `.env` pelo setup) |
+| `start_server.sh` | Start manual para debug — não necessário no uso normal |
 
 ---
 
-## Part 1 — One-time Pi Setup
+## Parte 1 — Configuração inicial do Pi
 
-> Requires keyboard/monitor or SSH access. Only done once.
+> Requer teclado/monitor ou acesso SSH. Feito apenas uma vez.
 
-### 1.1 Copy this folder to the Pi
+### 1.1 Copiar a pasta para o Pi
 
 ```bash
-scp -r AppInstalacao/ pi@<pi-ip>:~/AppInstalacao/
+scp -r AppInstalacao/ pi@<ip-do-pi>:~/AppInstalacao/
 ```
 
-### 1.2 Run the setup script
+### 1.2 Rodar o script de setup
 
 ```bash
 cd ~/AppInstalacao
 chmod +x setup_pi.sh start_server.sh
-sudo ./setup_pi.sh /path/to/your/images/folder
+sudo ./setup_pi.sh /caminho/para/sua/pasta/de/imagens
 ```
 
-**What this does:**
-- Installs `bluez-tools` and `dnsmasq`
-- Writes your image folder path to `.env` (used by Docker)
-- Builds the Docker image
-- Installs and enables the `bluetooth-pan` systemd service
-- Starts both the Bluetooth PAN service and the Docker container
-
-### 1.3 Pair your phone with the Pi (first time only)
-
-> The Pi initiates the pairing — more reliable than waiting for the phone to trigger it.
-
-**Step 1 — On the Pi**, open bluetoothctl:
-
-```bash
-sudo bluetoothctl
-```
-
-Run these commands one at a time:
-
-```
-power on
-agent on
-default-agent
-scan on
-```
-
-**Step 2 — On the phone**: open Settings → Bluetooth and leave the screen open
-(this makes the phone visible to the Pi for a few seconds).
-
-**Step 3 — Back on the Pi**: wait until the phone's MAC address appears in the output:
-
-```
-[NEW] Device AA:BB:CC:DD:EE:FF My Phone Name
-```
-
-Then run:
-
-```
-scan off
-pair AA:BB:CC:DD:EE:FF
-```
-
-A **numeric code** will appear on both the Pi terminal and the phone.
-Confirm on the phone. The Pi accepts automatically.
-
-**Step 4 — Trust the phone** so it reconnects without approval on future boots:
-
-```
-trust AA:BB:CC:DD:EE:FF
-exit
-```
-
-> If the phone does not appear after 30 seconds, toggle Bluetooth off and on on the phone and try `scan on` again.
-
-> After `trust`, on every subsequent boot the phone connects automatically — no interaction needed on the Pi.
+**O que esse script faz:**
+- Instala `hostapd` e `dnsmasq`
+- Salva o caminho das imagens no `.env` (usado pelo Docker)
+- Faz o build da imagem Docker
+- Instala e ativa o serviço `wifi-ap.service`
+- Sobe o AP Wi-Fi e o container Docker
 
 ---
 
-## Part 2 — Normal Use (After Setup)
+## Parte 2 — Uso normal (após o setup)
 
-**Turn on the Pi. That's it.**
+**Ligue o Pi. Só isso.**
 
-After ~15 seconds the services are up. On the phone:
+Após ~15 segundos os serviços sobem. No celular:
 
-### Android
-1. Settings → Bluetooth → tap **raspberrypi**
-2. Open browser → `http://192.168.50.1:8080`
+### Android e iOS
+1. Wi-Fi → conectar na rede **PiGaleria** (senha: `piimagens`)
+2. Abrir o navegador → `http://192.168.50.1:8080`
 
-### iOS
-1. Settings → Bluetooth → tap **raspberrypi**
-2. Open Safari → `http://192.168.50.1:8080`
+> O Android pode exibir "Sem acesso à internet" ao conectar — isso é esperado e não impede o uso. Toque em "Permanecer conectado" se aparecer.
 
 ---
 
-## Part 3 — Using the Gallery
+## Parte 3 — Usando a galeria
 
-- Folders are listed at the top — tap to navigate
-- Images appear as a thumbnail grid — tap to open full size
-- Pinch to zoom on the full image
-- Use the **← Back** button to go up a level
-- Images are served directly from the Pi (read-only)
+- Pastas aparecem no topo — toque para navegar
+- Imagens aparecem em grade de miniaturas — toque para abrir em tamanho completo
+- Belisque para dar zoom na imagem
+- Use o botão **← Voltar** para subir um nível
+- As imagens são servidas diretamente do Pi (somente leitura)
 
 ---
 
-## Changing the Image Folder
+## Alterar a pasta de imagens
 
-Edit `.env` on the Pi:
+Edite `.env` no Pi:
 
 ```bash
 nano ~/AppInstalacao/.env
-# change IMAGE_DIR=/new/path
+# altere IMAGE_DIR=/novo/caminho
 ```
 
-Then restart the Docker container:
+Reinicie o container:
 
 ```bash
 cd ~/AppInstalacao
@@ -166,22 +116,39 @@ docker compose restart
 
 ---
 
-## Useful Commands on the Pi
+## Alterar SSID ou senha do Wi-Fi
+
+Edite `hostapd.conf` no Pi:
 
 ```bash
-# Check service status
-systemctl status bluetooth-pan
+sudo nano /etc/hostapd/hostapd.conf
+# altere ssid= e wpa_passphrase=
+```
+
+Reinicie o serviço:
+
+```bash
+sudo systemctl restart wifi-ap
+```
+
+---
+
+## Comandos úteis no Pi
+
+```bash
+# Status dos serviços
+systemctl status wifi-ap
 docker compose -f ~/AppInstalacao/docker-compose.yml ps
 
-# View Flask logs
+# Logs do Flask
 docker logs gallery
 
-# Restart everything
-systemctl restart bluetooth-pan
+# Reiniciar tudo
+sudo systemctl restart wifi-ap
 docker compose -f ~/AppInstalacao/docker-compose.yml restart
 
-# Stop everything
-systemctl stop bluetooth-pan
+# Parar tudo
+sudo systemctl stop wifi-ap
 docker compose -f ~/AppInstalacao/docker-compose.yml down
 ```
 
@@ -189,12 +156,12 @@ docker compose -f ~/AppInstalacao/docker-compose.yml down
 
 ## Troubleshooting
 
-| Problem | Fix |
+| Problema | Solução |
 |---|---|
-| Phone can't find Pi in Bluetooth | `sudo bluetoothctl discoverable on` |
-| Browser can't reach `192.168.50.1` | `ip addr show pan0` — must show `192.168.50.1/24` |
-| Gallery shows empty page | Check `IMAGE_DIR` in `.env` and restart container |
-| `bt-network` not found | `sudo apt install bluez-tools` |
-| Container not running | `docker logs gallery` to see the error |
-| Phone connects but gets no IP | `sudo systemctl restart dnsmasq` |
-| Service fails at boot | `journalctl -u bluetooth-pan -n 50` |
+| Celular não vê a rede Wi-Fi | `sudo systemctl status wifi-ap` — verificar se hostapd iniciou |
+| Browser não alcança `192.168.50.1` | `ip addr show wlan0` — deve mostrar `192.168.50.1/24` |
+| Celular conecta mas não recebe IP | `sudo systemctl restart dnsmasq` |
+| Galeria abre vazia | Verificar `IMAGE_DIR` no `.env` e reiniciar o container |
+| Container não está rodando | `docker logs gallery` para ver o erro |
+| Serviço falha no boot | `journalctl -u wifi-ap -n 50` |
+| hostapd não encontrado | `sudo apt install hostapd` |
