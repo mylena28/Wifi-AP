@@ -18,18 +18,9 @@ if [ ! -d "$IMAGE_DIR" ]; then
     exit 1
 fi
 
-echo "=== [1/5] Installing Bluetooth PAN dependencies ==="
+echo "=== [1/5] Installing Wi-Fi AP dependencies ==="
 apt update
-apt install -y bluez bluez-tools dnsmasq tcpdump
-
-# Persist bridge-netfilter settings so they survive reboot.
-# br_netfilter routes bridge traffic through iptables; disabling it prevents
-# a default DROP FORWARD policy from blocking DHCP and HTTP on pan0.
-cat > /etc/sysctl.d/10-bridge-nf.conf <<'EOF'
-net.bridge.bridge-nf-call-iptables=0
-net.bridge.bridge-nf-call-ip6tables=0
-EOF
-sysctl --system 2>/dev/null | grep bridge-nf || true
+apt install -y hostapd dnsmasq
 
 echo "=== [2/5] Writing .env for Docker ==="
 echo "IMAGE_DIR=$IMAGE_DIR" > "$SCRIPT_DIR/.env"
@@ -39,26 +30,34 @@ echo "=== [3/5] Building Docker image ==="
 cd "$SCRIPT_DIR"
 docker compose build
 
-echo "=== [4/5] Installing Bluetooth PAN systemd service ==="
-cp "$SCRIPT_DIR/dnsmasq_pan.conf" /etc/dnsmasq.d/bluetooth-pan.conf
-cp "$SCRIPT_DIR/bluetooth-pan.service" /etc/systemd/system/bluetooth-pan.service
+echo "=== [4/5] Configuring Wi-Fi Access Point ==="
+# Tell NetworkManager to leave wlan0 alone
+nmcli device set wlan0 managed no 2>/dev/null || true
+rfkill unblock wifi 2>/dev/null || true
+
+# Copy configs
+mkdir -p /etc/hostapd
+cp "$SCRIPT_DIR/hostapd.conf"    /etc/hostapd/hostapd.conf
+cp "$SCRIPT_DIR/dnsmasq_wifi.conf" /etc/dnsmasq.d/wifi-ap.conf
+
+# Install systemd service
+cp "$SCRIPT_DIR/wifi-ap.service" /etc/systemd/system/wifi-ap.service
 systemctl daemon-reload
-systemctl enable bluetooth-pan.service
-# dnsmasq must only start when bluetooth-pan triggers it, not on boot alone
+systemctl enable wifi-ap.service
+
+# dnsmasq starts on demand from wifi-ap.service, not on boot
 systemctl disable dnsmasq
 systemctl stop dnsmasq 2>/dev/null || true
 
 echo "=== [5/5] Starting services ==="
-systemctl enable bluetooth
-systemctl restart bluetooth
-# remove leftover pan0 before starting (avoids "already exists" error)
-ip link set pan0 down 2>/dev/null; ip link delete pan0 2>/dev/null; true
-systemctl start bluetooth-pan.service
+systemctl start wifi-ap.service
 docker compose up -d
 
 echo ""
 echo "=== Setup complete ==="
-echo "Image folder : $IMAGE_DIR"
-echo "Gallery URL  : http://192.168.50.1:8080"
+echo "Image folder  : $IMAGE_DIR"
+echo "Wi-Fi SSID    : PiGaleria"
+echo "Wi-Fi password: piimagens"
+echo "Gallery URL   : http://192.168.50.1:8080"
 echo ""
-echo "Next step: pair your phone — see README.md Part 1.3"
+echo "Next step: connect your phone to Wi-Fi 'PiGaleria' and open http://192.168.50.1:8080"

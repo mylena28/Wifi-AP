@@ -93,6 +93,12 @@ def browse(subpath):
     return Response("".join(parts), mimetype="text/html")
 
 
+# Android network validation probe — returns 204 so Android stops cycling BT PAN
+@app.route("/generate_204")
+def generate_204():
+    return Response(status=204)
+
+
 if __name__ == "__main__":
     print(f"[GALLERY] Base folder: {BASE}")
     app.run(host="::", port=8080, debug=False)

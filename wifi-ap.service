@@ -1,0 +1,41 @@
+[Unit]
+Description=Wi-Fi Access Point (hostapd + dnsmasq)
+After=network.target
+
+[Service]
+Type=simple
+
+# Tell NetworkManager to leave wlan0 alone
+ExecStartPre=/bin/bash -c 'nmcli device set wlan0 managed no 2>/dev/null; true'
+# Unblock Wi-Fi in case rfkill has it blocked
+ExecStartPre=/bin/bash -c 'rfkill unblock wifi 2>/dev/null; true'
+
+# Assign static IP before hostapd starts
+ExecStartPre=/bin/bash -c 'ip addr flush dev wlan0 2>/dev/null; true'
+ExecStartPre=/usr/bin/ip addr add 192.168.50.1/24 dev wlan0
+ExecStartPre=/usr/bin/ip link set wlan0 up
+
+# Redirect port 80 → 8080 so Android connectivity probes reach Flask
+ExecStartPre=/bin/bash -c 'iptables -t nat -C PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null || iptables -t nat -I PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port 8080'
+# Allow all traffic from wlan0 regardless of Docker's DROP policy
+ExecStartPre=/bin/bash -c 'iptables -C INPUT   -i wlan0 -j ACCEPT 2>/dev/null || iptables -I INPUT   -i wlan0 -j ACCEPT'
+ExecStartPre=/bin/bash -c 'iptables -C FORWARD -i wlan0 -j ACCEPT 2>/dev/null || iptables -I FORWARD -i wlan0 -j ACCEPT'
+
+# Main process — hostapd runs the AP
+ExecStart=/usr/sbin/hostapd /etc/hostapd/hostapd.conf
+
+# Start dnsmasq after wlan0 is up (IP already set in ExecStartPre)
+ExecStartPost=/bin/systemctl restart dnsmasq
+
+# Cleanup on stop
+ExecStop=/bin/systemctl stop dnsmasq
+ExecStop=/bin/bash -c 'iptables -t nat -D PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null; true'
+ExecStop=/bin/bash -c 'iptables -D INPUT   -i wlan0 -j ACCEPT 2>/dev/null; true'
+ExecStop=/bin/bash -c 'iptables -D FORWARD -i wlan0 -j ACCEPT 2>/dev/null; true'
+ExecStop=/bin/bash -c 'ip addr flush dev wlan0 2>/dev/null; true'
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
