@@ -18,6 +18,15 @@ if [ ! -d "$IMAGE_DIR" ]; then
     exit 1
 fi
 
+echo "=== [0/5] Removing old Bluetooth PAN setup (if present) ==="
+systemctl stop bluetooth-pan.service 2>/dev/null || true
+systemctl disable bluetooth-pan.service 2>/dev/null || true
+rm -f /etc/systemd/system/bluetooth-pan.service
+rm -f /etc/dnsmasq.d/bluetooth-pan.conf
+ip link set pan0 down 2>/dev/null || true
+ip link delete pan0 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || true
+
 echo "=== [1/5] Installing Wi-Fi AP dependencies ==="
 apt update
 apt install -y hostapd dnsmasq
