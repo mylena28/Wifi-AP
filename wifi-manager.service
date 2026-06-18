@@ -1,0 +1,15 @@
+[Unit]
+Description=Wi-Fi Manager — AP / cliente automático
+After=network.target NetworkManager.service
+Requires=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wifi_manager.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

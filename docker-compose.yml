@@ -6,5 +6,6 @@ services:
     network_mode: host        # binds directly to host IP (192.168.50.1:8080)
     volumes:
       - ${IMAGE_DIR:-/home/pi/capturas}:/data:ro
+      - /etc/wifi_manager:/etc/wifi_manager:rw
     environment:
       - IMAGE_DIR=/data

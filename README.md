@@ -1,32 +1,72 @@
-# AppInstalacao — Wi-Fi AP + Flask Image Gallery
+# AppInstalacao — Wi-Fi Manager + Flask Image Gallery
 
-Acesse imagens do Raspberry Pi 5 pelo celular via Wi-Fi direto.
-Sem internet, sem roteador. Tudo sobe automaticamente no boot.
+Acesse imagens do Raspberry Pi 5 pelo celular via Wi-Fi direto (modo AP).
+Quando disponível, o Pi conecta automaticamente a uma rede Wi-Fi conhecida para manter o acesso à internet.
+
+---
+
+## Comportamento automático
+
+O `wifi_manager` gerencia o Wi-Fi sem intervenção manual:
+
+```
+Boot
+  │
+  ▼
+┌──────────────────────────────────────────────────────┐
+│  MODO AP — "PiGaleria" @ 192.168.50.1:8080           │
+│  Aguarda clientes por 15 min                         │
+│  · Alguém conecta → pausa o timer                    │
+│  · Último cliente sai → vai para scan imediato       │
+│  · 15 min sem ninguém → vai para scan                │
+└───────────────────────────┬──────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────┐◄──────────┐
+│  WIFI SCAN                                           │           │
+│  1. Tenta perfis salvos no NetworkManager            │           │
+│  2. Tenta redes do /etc/wifi_manager/networks.conf   │           │
+│  · Conectou → WIFI CLIENT                            │           │
+│  · Nada encontrado → volta ao AP (ciclo) ────────────┼───────────┘
+└───────────────────────────┬──────────────────────────┘
+                            │ conectou
+                            ▼
+┌──────────────────────────────────────────────────────┐
+│  WIFI CLIENT                                         │
+│  Sistema inteiro tem acesso à internet               │
+│  Checa conexão a cada 60s                            │
+│  · Perdeu conexão → WIFI SCAN (não volta ao AP)      │
+└──────────────────────────────────────────────────────┘
+```
+
+> No modo AP a galeria está disponível em `http://192.168.50.1:8080`.
+> No modo cliente Wi-Fi a galeria não precisa estar acessível — o objetivo é internet.
 
 ---
 
 ## Arquitetura
 
 ```
-┌──────────────────────────────────────────────┐
-│              Raspberry Pi 5                  │
-│                                              │
-│  [systemd: wifi-ap.service]                  │
-│    • Configura wlan0 com IP 192.168.50.1     │
-│    • Sobe hostapd (AP Wi-Fi "PiGaleria")     │
-│    • Sobe dnsmasq (DHCP para o celular)      │
-│    • Redireciona porta 80 → 8080 (iptables)  │
-│                                              │
-│  [Docker: gallery container]                 │
-│    • Flask image gallery na porta 8080       │
-│    • Monta a pasta de imagens (read-only)    │
-│    • restart: always → sobrevive reboots     │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    Raspberry Pi 5                        │
+│                                                          │
+│  [systemd: wifi-manager.service]                         │
+│    • wifi_manager.sh — máquina de estados                │
+│    • Modo AP: hostapd + dnsmasq + iptables               │
+│    • Modo cliente: NetworkManager (nmcli)                │
+│    • Lê redes de /etc/wifi_manager/networks.conf         │
+│                                                          │
+│  [Docker: gallery]                                       │
+│    • Flask gallery na porta 8080                         │
+│    • Monta pasta de imagens (read-only)                  │
+│    • Monta /etc/wifi_manager (leitura e escrita)         │
+│    • restart: always → sobrevive reboots                 │
+└──────────────────────────────────────────────────────────┘
           ▲ Wi-Fi (SSID: PiGaleria)
           │
-    ┌─────────┐
-    │  Celular │  Browser → http://192.168.50.1:8080
-    └─────────┘
+    ┌──────────┐
+    │  Celular  │  Browser → http://192.168.50.1:8080
+    └──────────┘          → /redes para gerenciar redes Wi-Fi
 ```
 
 ---
@@ -36,14 +76,15 @@ Sem internet, sem roteador. Tudo sobe automaticamente no boot.
 | Arquivo | Função |
 |---|---|
 | `setup_pi.sh` | Roda **uma vez** — instala dependências, build Docker, ativa serviços |
-| `wifi-ap.service` | Serviço systemd — gerencia o AP Wi-Fi e o roteamento |
+| `wifi_manager.sh` | Script principal — máquina de estados AP / WiFi scan / cliente |
+| `wifi-manager.service` | Serviço systemd do gerenciador Wi-Fi (sobe no boot) |
+| `networks.conf` | Template do arquivo de redes conhecidas (instalado em `/etc/wifi_manager/`) |
 | `hostapd.conf` | Configuração do AP Wi-Fi (SSID, senha, canal) |
-| `dnsmasq_wifi.conf` | DHCP para a interface `wlan0` |
+| `dnsmasq_wifi.conf` | DHCP para a interface `wlan0` no modo AP |
 | `docker-compose.yml` | Definição do serviço Docker da galeria |
 | `Dockerfile` | Imagem Python + Flask |
-| `gallery.py` | Código-fonte da galeria Flask |
+| `gallery.py` | Galeria Flask + página `/redes` para gerenciar redes |
 | `.env.example` | Template da pasta de imagens (copiado para `.env` pelo setup) |
-| `start_server.sh` | Start manual para debug — não necessário no uso normal |
 
 ---
 
@@ -61,16 +102,19 @@ scp -r AppInstalacao/ pi@<ip-do-pi>:~/AppInstalacao/
 
 ```bash
 cd ~/AppInstalacao
-chmod +x setup_pi.sh start_server.sh
+chmod +x setup_pi.sh wifi_manager.sh
 sudo ./setup_pi.sh /caminho/para/sua/pasta/de/imagens
 ```
 
 **O que esse script faz:**
+- Remove serviços antigos (Bluetooth PAN, wifi-ap)
 - Instala `hostapd` e `dnsmasq`
-- Salva o caminho das imagens no `.env` (usado pelo Docker)
+- Salva o caminho das imagens no `.env`
 - Faz o build da imagem Docker
-- Instala e ativa o serviço `wifi-ap.service`
-- Sobe o AP Wi-Fi e o container Docker
+- Instala `wifi_manager.sh` em `/usr/local/bin/`
+- Cria `/etc/wifi_manager/networks.conf` (se não existir)
+- Ativa `wifi-manager.service` e `docker` no boot
+- Sobe o container e inicia o gerenciador Wi-Fi
 
 ---
 
@@ -78,57 +122,76 @@ sudo ./setup_pi.sh /caminho/para/sua/pasta/de/imagens
 
 **Ligue o Pi. Só isso.**
 
-Após ~15 segundos os serviços sobem. No celular:
+O Pi sobe no modo AP por padrão. No celular:
 
-### Android e iOS
-1. Wi-Fi → conectar na rede **PiGaleria** (senha: `piimagens`)
+1. Wi-Fi → conectar em **PiGaleria** (senha: `piimagens`)
 2. Abrir o navegador → `http://192.168.50.1:8080`
 
-> O Android pode exibir "Sem acesso à internet" ao conectar — isso é esperado e não impede o uso. Toque em "Permanecer conectado" se aparecer.
+> O Android pode exibir "Sem acesso à internet" — isso é esperado no modo AP. Toque em **Permanecer conectado**.
 
 ---
 
 ## Parte 3 — Usando a galeria
 
-- Pastas aparecem no topo — toque para navegar
+- Pastas aparecem no topo — toque para navegar entre elas
 - Imagens aparecem em grade de miniaturas — toque para abrir em tamanho completo
-- Belisque para dar zoom na imagem
 - Use o botão **← Voltar** para subir um nível
 - As imagens são servidas diretamente do Pi (somente leitura)
 
 ---
 
-## Alterar a pasta de imagens
+## Parte 4 — Gerenciar redes Wi-Fi salvas
 
-Edite `.env` no Pi:
+### Pelo browser (recomendado)
+
+Conecte no AP `PiGaleria` e acesse `http://192.168.50.1:8080/redes`
+
+O link **⚙ redes wi-fi** também aparece no canto superior direito da galeria quando você está no AP.
+
+Na página você pode:
+- Ver todas as redes cadastradas
+- Adicionar uma nova rede (SSID + senha)
+- Remover uma rede
+
+> A página só funciona quando conectado ao AP. Fora do AP retorna 403.
+
+### Diretamente no arquivo
+
+```bash
+sudo nano /etc/wifi_manager/networks.conf
+```
+
+Formato:
+```
+# Comentários começam com #
+MinhaRedeCasa=minhasenha123
+RedeDoTrabalho=outrasenha
+RedeAberta=
+```
+
+As alterações são lidas na próxima vez que o gerenciador entrar no estado de scan.
+
+---
+
+## Alterar a pasta de imagens
 
 ```bash
 nano ~/AppInstalacao/.env
 # altere IMAGE_DIR=/novo/caminho
-```
 
-Reinicie o container:
-
-```bash
 cd ~/AppInstalacao
 docker compose restart
 ```
 
 ---
 
-## Alterar SSID ou senha do Wi-Fi
-
-Edite `hostapd.conf` no Pi:
+## Alterar SSID ou senha do AP
 
 ```bash
 sudo nano /etc/hostapd/hostapd.conf
 # altere ssid= e wpa_passphrase=
-```
 
-Reinicie o serviço:
-
-```bash
-sudo systemctl restart wifi-ap
+sudo systemctl restart wifi-manager
 ```
 
 ---
@@ -136,20 +199,27 @@ sudo systemctl restart wifi-ap
 ## Comandos úteis no Pi
 
 ```bash
-# Status dos serviços
-systemctl status wifi-ap
+# Acompanhar o gerenciador em tempo real
+journalctl -fu wifi-manager.service
+
+# Status geral
+systemctl status wifi-manager
 docker compose -f ~/AppInstalacao/docker-compose.yml ps
 
-# Logs do Flask
+# Logs do container Flask
 docker logs gallery
 
-# Reiniciar tudo
-sudo systemctl restart wifi-ap
+# Forçar reinício do gerenciador Wi-Fi
+sudo systemctl restart wifi-manager
+
+# Forçar reinício do container
 docker compose -f ~/AppInstalacao/docker-compose.yml restart
 
-# Parar tudo
-sudo systemctl stop wifi-ap
-docker compose -f ~/AppInstalacao/docker-compose.yml down
+# Ver clientes conectados ao AP
+iw dev wlan0 station dump
+
+# Ver rede Wi-Fi atual (modo cliente)
+nmcli device show wlan0
 ```
 
 ---
@@ -158,10 +228,12 @@ docker compose -f ~/AppInstalacao/docker-compose.yml down
 
 | Problema | Solução |
 |---|---|
-| Celular não vê a rede Wi-Fi | `sudo systemctl status wifi-ap` — verificar se hostapd iniciou |
+| Celular não vê a rede "PiGaleria" | `journalctl -u wifi-manager -n 50` — verificar se hostapd iniciou |
 | Browser não alcança `192.168.50.1` | `ip addr show wlan0` — deve mostrar `192.168.50.1/24` |
 | Celular conecta mas não recebe IP | `sudo systemctl restart dnsmasq` |
+| Pi não conecta ao Wi-Fi conhecido | Verificar `/etc/wifi_manager/networks.conf` — SSID e senha corretos? |
+| Pi ficou preso em WIFI_SCAN | `sudo systemctl restart wifi-manager` para reiniciar o ciclo |
 | Galeria abre vazia | Verificar `IMAGE_DIR` no `.env` e reiniciar o container |
-| Container não está rodando | `docker logs gallery` para ver o erro |
-| Serviço falha no boot | `journalctl -u wifi-ap -n 50` |
-| hostapd não encontrado | `sudo apt install hostapd` |
+| Página `/redes` retorna 403 | Você não está conectado ao AP — essa página só funciona via PiGaleria |
+| Container não inicia | `docker logs gallery` para ver o erro |
+| Serviço não sobe no boot | `journalctl -u wifi-manager -n 50` |
