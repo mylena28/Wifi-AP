@@ -1,7 +1,7 @@
-# AppInstalacao — Wi-Fi Manager + Flask Image Gallery
+# AppInstalacao — Wi-Fi Manager + Flask Image Gallery + Backup
 
 Acesse imagens do Raspberry Pi 5 pelo celular via Wi-Fi direto (modo AP).
-Quando disponível, o Pi conecta automaticamente a uma rede Wi-Fi conhecida para manter o acesso à internet.
+Quando disponível, o Pi conecta automaticamente a uma rede Wi-Fi conhecida — e sincroniza as imagens com um Pi de backup via rsync.
 
 ---
 
@@ -35,12 +35,14 @@ Boot
 │  WIFI CLIENT                                         │
 │  Sistema inteiro tem acesso à internet               │
 │  Checa conexão a cada 60s                            │
+│  · Ao conectar → dispara rsync para Pi backup        │
+│  · A cada 1h → rsync novamente                       │
 │  · Perdeu conexão → WIFI SCAN (não volta ao AP)      │
 └──────────────────────────────────────────────────────┘
 ```
 
 > No modo AP a galeria está disponível em `http://192.168.50.1:8080`.
-> No modo cliente Wi-Fi a galeria não precisa estar acessível — o objetivo é internet.
+> No modo cliente Wi-Fi o objetivo é internet + backup — a galeria não precisa estar acessível.
 
 ---
 
@@ -48,13 +50,14 @@ Boot
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    Raspberry Pi 5                        │
+│                  Raspberry Pi (campo)                    │
 │                                                          │
 │  [systemd: wifi-manager.service]                         │
 │    • wifi_manager.sh — máquina de estados                │
 │    • Modo AP: hostapd + dnsmasq + iptables               │
 │    • Modo cliente: NetworkManager (nmcli)                │
 │    • Lê redes de /etc/wifi_manager/networks.conf         │
+│    • Ao conectar: dispara sync_backup.sh em background   │
 │                                                          │
 │  [Docker: gallery]                                       │
 │    • Flask gallery na porta 8080                         │
@@ -62,11 +65,13 @@ Boot
 │    • Monta /etc/wifi_manager (leitura e escrita)         │
 │    • restart: always → sobrevive reboots                 │
 └──────────────────────────────────────────────────────────┘
-          ▲ Wi-Fi (SSID: PiGaleria)
-          │
-    ┌──────────┐
-    │  Celular  │  Browser → http://192.168.50.1:8080
-    └──────────┘          → /redes para gerenciar redes Wi-Fi
+     ▲ Wi-Fi AP              ▲ Wi-Fi cliente (internet)
+     │                       │
+┌──────────┐         ┌───────────────────────┐
+│  Celular  │         │  Raspberry Pi backup  │
+│  :8080    │         │  rsync ← imagens      │
+└──────────┘         │  IP fixo              │
+  /redes             └───────────────────────┘
 ```
 
 ---
@@ -78,7 +83,9 @@ Boot
 | `setup_pi.sh` | Roda **uma vez** — instala dependências, build Docker, ativa serviços |
 | `wifi_manager.sh` | Script principal — máquina de estados AP / WiFi scan / cliente |
 | `wifi-manager.service` | Serviço systemd do gerenciador Wi-Fi (sobe no boot) |
-| `networks.conf` | Template do arquivo de redes conhecidas (instalado em `/etc/wifi_manager/`) |
+| `sync_backup.sh` | Executa rsync para o Pi backup via SSH |
+| `networks.conf` | Template de redes conhecidas (instalado em `/etc/wifi_manager/`) |
+| `backup.conf` | Template de configuração do backup (instalado em `/etc/wifi_manager/`) |
 | `hostapd.conf` | Configuração do AP Wi-Fi (SSID, senha, canal) |
 | `dnsmasq_wifi.conf` | DHCP para a interface `wlan0` no modo AP |
 | `docker-compose.yml` | Definição do serviço Docker da galeria |
@@ -111,8 +118,9 @@ sudo ./setup_pi.sh /caminho/para/sua/pasta/de/imagens
 - Instala `hostapd` e `dnsmasq`
 - Salva o caminho das imagens no `.env`
 - Faz o build da imagem Docker
-- Instala `wifi_manager.sh` em `/usr/local/bin/`
-- Cria `/etc/wifi_manager/networks.conf` (se não existir)
+- Instala `wifi_manager.sh` e `sync_backup.sh` em `/usr/local/bin/`
+- Cria `/etc/wifi_manager/networks.conf` e `backup.conf` (se não existirem)
+- Gera chave SSH para rsync sem senha (`/root/.ssh/wifi_manager_backup`)
 - Ativa `wifi-manager.service` e `docker` no boot
 - Sobe o container e inicia o gerenciador Wi-Fi
 
@@ -170,6 +178,48 @@ RedeAberta=
 ```
 
 As alterações são lidas na próxima vez que o gerenciador entrar no estado de scan.
+
+---
+
+## Parte 5 — Backup automático para Pi externo
+
+Quando o Pi de campo se conecta à internet, ele sincroniza automaticamente a pasta de imagens com um Pi de backup via rsync.
+
+- Só adiciona e atualiza arquivos — **nunca deleta** nada do backup
+- Roda ao conectar e a cada 1 hora enquanto conectado
+- Se o Pi backup estiver offline, o sync é ignorado e tentado novamente no próximo intervalo
+
+### 5.1 Configurar o backup
+
+Edite o arquivo no Pi de campo:
+
+```bash
+sudo nano /etc/wifi_manager/backup.conf
+```
+
+```
+BACKUP_HOST=192.168.x.x   # IP fixo do Pi backup
+BACKUP_USER=pi             # usuário SSH no Pi backup
+BACKUP_PATH=/home/pi/backup
+BACKUP_INTERVAL=3600       # intervalo em segundos (3600 = 1h)
+```
+
+### 5.2 Autorizar acesso SSH (passo manual único)
+
+O `setup_pi.sh` já gerou uma chave SSH em `/root/.ssh/wifi_manager_backup`.
+Rode este comando **uma vez** para autorizar o Pi de campo no Pi backup:
+
+```bash
+ssh-copy-id -i /root/.ssh/wifi_manager_backup.pub pi@<ip-do-backup>
+```
+
+Após isso o rsync funciona automaticamente, sem digitar senha.
+
+### 5.3 Testar manualmente
+
+```bash
+sudo /usr/local/bin/sync_backup.sh
+```
 
 ---
 
@@ -237,3 +287,6 @@ nmcli device show wlan0
 | Página `/redes` retorna 403 | Você não está conectado ao AP — essa página só funciona via PiGaleria |
 | Container não inicia | `docker logs gallery` para ver o erro |
 | Serviço não sobe no boot | `journalctl -u wifi-manager -n 50` |
+| Backup não roda | Verificar `BACKUP_HOST` em `/etc/wifi_manager/backup.conf` |
+| Erro de permissão no rsync | Rodar `ssh-copy-id -i /root/.ssh/wifi_manager_backup.pub pi@<ip>` no Pi backup |
+| Testar sync manualmente | `sudo /usr/local/bin/sync_backup.sh` e ver `/var/log/wifi_manager.log` |
