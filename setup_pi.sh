@@ -60,10 +60,11 @@ mkdir -p /etc/hostapd
 cp "$SCRIPT_DIR/hostapd.conf"       /etc/hostapd/hostapd.conf
 cp "$SCRIPT_DIR/dnsmasq_wifi.conf"  /etc/dnsmasq.d/wifi-ap.conf
 
-echo "=== [5/6] Instalando wifi_manager ==="
+echo "=== [5/6] Instalando wifi_manager + backup ==="
+
+mkdir -p /etc/wifi_manager
 
 # Arquivo de redes conhecidas
-mkdir -p /etc/wifi_manager
 if [ ! -f /etc/wifi_manager/networks.conf ]; then
     cp "$SCRIPT_DIR/networks.conf" /etc/wifi_manager/networks.conf
     echo "  networks.conf criado em /etc/wifi_manager/"
@@ -72,9 +73,31 @@ else
 fi
 chmod 664 /etc/wifi_manager/networks.conf
 
-# Script principal
-cp "$SCRIPT_DIR/wifi_manager.sh" /usr/local/bin/wifi_manager.sh
-chmod +x /usr/local/bin/wifi_manager.sh
+# Configuração de backup
+if [ ! -f /etc/wifi_manager/backup.conf ]; then
+    cp "$SCRIPT_DIR/backup.conf" /etc/wifi_manager/backup.conf
+    echo "  backup.conf criado em /etc/wifi_manager/"
+else
+    echo "  backup.conf já existe — mantendo configuração atual."
+fi
+chmod 664 /etc/wifi_manager/backup.conf
+
+# Copia o .env para /etc/wifi_manager/ para o sync_backup.sh ler
+cp "$SCRIPT_DIR/.env" /etc/wifi_manager/.env
+
+# Scripts principais
+cp "$SCRIPT_DIR/wifi_manager.sh"  /usr/local/bin/wifi_manager.sh
+cp "$SCRIPT_DIR/sync_backup.sh"   /usr/local/bin/sync_backup.sh
+chmod +x /usr/local/bin/wifi_manager.sh /usr/local/bin/sync_backup.sh
+
+# Chave SSH para rsync sem senha
+SSH_KEY="/root/.ssh/wifi_manager_backup"
+if [ ! -f "$SSH_KEY" ]; then
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    ssh-keygen -t ed25519 -f "$SSH_KEY" -N "" -C "wifi_manager_backup@$(hostname)" -q
+    echo "  Chave SSH gerada: $SSH_KEY"
+fi
 
 # Serviço systemd
 cp "$SCRIPT_DIR/wifi-manager.service" /etc/systemd/system/wifi-manager.service
@@ -96,7 +119,14 @@ echo "  Wi-Fi senha       : piimagens"
 echo "  Galeria (AP)      : http://192.168.50.1:8080"
 echo "  Gerenciar redes   : http://192.168.50.1:8080/redes"
 echo ""
-echo "  Editar redes salvas: /etc/wifi_manager/networks.conf"
-echo "  Logs em tempo real : journalctl -fu wifi-manager.service"
+echo "  Editar redes salvas : /etc/wifi_manager/networks.conf"
+echo "  Configurar backup   : /etc/wifi_manager/backup.conf"
+echo "  Logs em tempo real  : journalctl -fu wifi-manager.service"
+echo ""
+echo "--- BACKUP (passo manual único) ---"
+echo "Quando tiver o IP do Pi backup, edite /etc/wifi_manager/backup.conf"
+echo "e rode o comando abaixo para autorizar o acesso SSH:"
+echo ""
+echo "  ssh-copy-id -i ${SSH_KEY}.pub pi@<ip-do-backup>"
 echo ""
 echo "Conecte o celular ao Wi-Fi 'PiGaleria' e abra http://192.168.50.1:8080"

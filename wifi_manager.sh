@@ -2,11 +2,13 @@
 # Gerenciador Wi-Fi: AP no boot → scan de redes → cliente → scan ao perder conexão
 
 NETWORKS_FILE="/etc/wifi_manager/networks.conf"
+BACKUP_CONF="/etc/wifi_manager/backup.conf"
 AP_TIMEOUT=900        # 15 min sem nenhum cliente → vai para scan
 CHECK_AP_INTERVAL=30  # intervalo de verificação de clientes no AP (segundos)
 CHECK_WIFI_INTERVAL=60 # intervalo de verificação da conexão WiFi (segundos)
 LOG="/var/log/wifi_manager.log"
 HOSTAPD_PID=""
+BACKUP_INTERVAL=3600  # padrão; sobrescrito pelo backup.conf
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"; }
 
@@ -238,10 +240,31 @@ run_wifi_scan_state() {
     transition_to "AP"
 }
 
+# ── Backup ───────────────────────────────────────────────────────────────────
+
+_load_backup_interval() {
+    [ -f "$BACKUP_CONF" ] && source "$BACKUP_CONF" 2>/dev/null || true
+}
+
+_run_backup() {
+    if [ ! -f "$BACKUP_CONF" ]; then return; fi
+    source "$BACKUP_CONF" 2>/dev/null || return
+    [ -z "$BACKUP_HOST" ] && return  # não configurado ainda
+    log "Disparando sync de backup em background..."
+    /usr/local/bin/sync_backup.sh &
+}
+
 # ── Estado WIFI_CLIENT ────────────────────────────────────────────────────────
 
 run_wifi_client_state() {
+    _load_backup_interval
+
     log "Modo WiFi cliente ativo. Checando conexão a cada ${CHECK_WIFI_INTERVAL}s..."
+
+    _run_backup  # sync imediato ao conectar
+
+    local last_backup
+    last_backup=$(date +%s)
 
     while true; do
         sleep $CHECK_WIFI_INTERVAL
@@ -250,6 +273,13 @@ run_wifi_client_state() {
             log "Conexão WiFi perdida. Indo para scan..."
             transition_to "WIFI_SCAN"
             return
+        fi
+
+        local now
+        now=$(date +%s)
+        if [ $(( now - last_backup )) -ge "$BACKUP_INTERVAL" ]; then
+            _run_backup
+            last_backup=$now
         fi
     done
 }
