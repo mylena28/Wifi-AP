@@ -196,6 +196,30 @@ sudo systemctl restart wifi-manager
 
 ---
 
+## Desativar o AP e conectar ao Wi-Fi manualmente
+
+Útil para acessar o Pi pela rede local (ex: para atualizar o código via SSH).
+
+```bash
+# 1. Parar o serviço de AP
+sudo systemctl stop wifi-ap.service
+
+# 2. Devolver controle da interface ao NetworkManager
+sudo nmcli device set wlan0 managed yes
+
+# 3. Conectar à rede desejada
+sudo nmcli device wifi connect "NOME_DA_REDE" password "SENHA"
+```
+
+> Após conectar, descubra o IP do Pi com `hostname -I` e reconecte via SSH antes de fechar a sessão atual.
+
+Para restaurar o AP, basta reiniciar o serviço:
+```bash
+sudo systemctl start wifi-ap.service
+```
+
+---
+
 ## Comandos úteis no Pi
 
 ```bash
