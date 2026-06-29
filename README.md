@@ -261,3 +261,21 @@ nmcli device show wlan0
 | Página `/redes` retorna 403 | Você não está conectado ao AP — essa página só funciona via PiGaleria |
 | Container não inicia | `docker logs gallery` para ver o erro |
 | Serviço não sobe no boot | `journalctl -u wifi-manager -n 50` |
+
+---
+
+## Licença
+
+Este projeto está licenciado sob a [Licença MIT](LICENSE).
+
+---
+
+## Agradecimentos
+
+Este projeto é desenvolvido em parceria com:
+
+- **[FAPEG](https://www.fapeg.go.gov.br)** — Fundação de Amparo à Pesquisa do Estado de Goiás
+- **IEL/GO** — Instituto Euvaldo Lodi — Núcleo Regional Goiás
+- **Salte Tecnologia**
+
+A pesquisa conta com apoio da FAPEG no âmbito do programa *Segurança na Operação de Equipamentos Móveis* (Edital 27/2025).
