@@ -13,9 +13,13 @@ systemctl stop dnsmasq 2>/dev/null || true
 echo "Liberando wlan0 para o NetworkManager..."
 rm -f /etc/NetworkManager/conf.d/99-ap-mode.conf
 nmcli general reload conf 2>/dev/null || true
-sleep 2
+sleep 3
+rfkill unblock wifi 2>/dev/null || true
+nmcli radio wifi on 2>/dev/null || true
 ip addr flush dev wlan0 2>/dev/null || true
-nmcli device set wlan0 managed yes
+nmcli device set wlan0 managed yes 2>/dev/null || true
+ip link set wlan0 down 2>/dev/null || true
+sleep 1
 ip link set wlan0 up
 
 echo "Conectando a '$CONEXAO'..."

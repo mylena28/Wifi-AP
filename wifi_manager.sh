@@ -65,15 +65,20 @@ _nm_unmanage_wlan0() {
 [keyfile]
 unmanaged-devices=interface-name:wlan0
 EOF
-    nmcli general reload conf &
+    nmcli general reload conf
     sleep 3
 }
 
 _nm_manage_wlan0() {
     rm -f /etc/NetworkManager/conf.d/99-ap-mode.conf
-    nmcli general reload conf &
+    nmcli general reload conf
     sleep 3
+    rfkill unblock wifi 2>/dev/null || true
+    nmcli radio wifi on 2>/dev/null || true
     nmcli device set wlan0 managed yes 2>/dev/null || true
+    ip link set wlan0 down 2>/dev/null || true
+    sleep 1
+    ip link set wlan0 up 2>/dev/null || true
 }
 
 _start_ap() {
@@ -101,9 +106,10 @@ _stop_ap() {
     _stop_hostapd
     systemctl stop dnsmasq 2>/dev/null || true
     _ap_iptables_del
+    ip link set wlan0 down 2>/dev/null || true
     ip addr flush dev wlan0 2>/dev/null || true
     _nm_manage_wlan0
-    sleep 1
+    sleep 2
 }
 
 _ap_client_count() {
@@ -152,10 +158,9 @@ run_ap_state() {
 # ── Estado WIFI_SCAN ─────────────────────────────────────────────────────────
 
 _enable_nm() {
-    _nm_manage_wlan0
     nmcli device set wlan0 managed yes 2>/dev/null || true
     ip link set wlan0 up 2>/dev/null || true
-    sleep 3
+    sleep 5
 }
 
 _get_visible_ssids() {
@@ -175,7 +180,7 @@ _try_nm_saved() {
 
     # Lista conexões WiFi salvas no NM
     connections=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \
-        | grep ':wifi$' | cut -d: -f1)
+        | grep -E ':(wifi|802-11-wireless)$' | cut -d: -f1)
 
     [ -z "$connections" ] && return 1
 
