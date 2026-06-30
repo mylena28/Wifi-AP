@@ -6,8 +6,17 @@ BACKUP_CONF="/etc/wifi_manager/backup.conf"
 ENV_FILE="/etc/wifi_manager/.env"
 SSH_KEY="/root/.ssh/wifi_manager_backup"
 LOG="/var/log/wifi_manager.log"
+LOCK="/var/run/sync_backup.lock"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [backup] $1" | tee -a "$LOG"; }
+
+# Impede execuções simultâneas
+if [ -f "$LOCK" ] && kill -0 "$(cat $LOCK)" 2>/dev/null; then
+    log "Sync já em andamento (PID $(cat $LOCK)) — ignorando chamada."
+    exit 0
+fi
+echo $$ > "$LOCK"
+trap "rm -f $LOCK" EXIT
 
 # Carrega configurações
 [ -f "$BACKUP_CONF" ] || { log "backup.conf não encontrado: $BACKUP_CONF"; exit 1; }
@@ -38,6 +47,7 @@ log "Iniciando sync: $IMAGE_DIR → $DEST"
 
 rsync -az \
     --no-delete \
+    --partial \
     --timeout=30 \
     -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10" \
     "$IMAGE_DIR/" \

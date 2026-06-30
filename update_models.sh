@@ -8,8 +8,17 @@ PROJECTS=(
 )
 
 LOG="/var/log/wifi_manager.log"
+LOCK="/var/run/update_models.lock"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [update] $1" | tee -a "$LOG"; }
+
+# Impede execuções simultâneas
+if [ -f "$LOCK" ] && kill -0 "$(cat $LOCK)" 2>/dev/null; then
+    log "Update já em andamento (PID $(cat $LOCK)) — ignorando chamada."
+    exit 0
+fi
+echo $$ > "$LOCK"
+trap "rm -f $LOCK" EXIT
 
 update_project() {
     local repo="$1"
