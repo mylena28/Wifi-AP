@@ -281,6 +281,15 @@ _run_backup() {
     /usr/local/bin/sync_backup.sh &
 }
 
+# ── Update de modelos ─────────────────────────────────────────────────────────
+
+UPDATE_INTERVAL=3600  # verifica atualizações a cada 1h
+
+_run_update() {
+    log "Verificando atualizações dos modelos em background..."
+    /usr/local/bin/update_models.sh &
+}
+
 # ── Estado WIFI_CLIENT ────────────────────────────────────────────────────────
 
 run_wifi_client_state() {
@@ -288,10 +297,12 @@ run_wifi_client_state() {
 
     log "Modo WiFi cliente ativo. Checando conexão a cada ${CHECK_WIFI_INTERVAL}s..."
 
-    _run_backup  # sync imediato ao conectar
+    _run_backup   # sync imediato ao conectar
+    _run_update   # verifica atualizações imediatamente ao conectar
 
-    local last_backup
+    local last_backup last_update now
     last_backup=$(date +%s)
+    last_update=$(date +%s)
 
     while true; do
         sleep $CHECK_WIFI_INTERVAL
@@ -302,11 +313,16 @@ run_wifi_client_state() {
             return
         fi
 
-        local now
         now=$(date +%s)
+
         if [ $(( now - last_backup )) -ge "$BACKUP_INTERVAL" ]; then
             _run_backup
             last_backup=$now
+        fi
+
+        if [ $(( now - last_update )) -ge "$UPDATE_INTERVAL" ]; then
+            _run_update
+            last_update=$now
         fi
     done
 }

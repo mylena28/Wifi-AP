@@ -86,9 +86,12 @@ chmod 664 /etc/wifi_manager/backup.conf
 cp "$SCRIPT_DIR/.env" /etc/wifi_manager/.env
 
 # Scripts principais
-cp "$SCRIPT_DIR/wifi_manager.sh"  /usr/local/bin/wifi_manager.sh
-cp "$SCRIPT_DIR/sync_backup.sh"   /usr/local/bin/sync_backup.sh
-chmod +x /usr/local/bin/wifi_manager.sh /usr/local/bin/sync_backup.sh
+cp "$SCRIPT_DIR/wifi_manager.sh"   /usr/local/bin/wifi_manager.sh
+cp "$SCRIPT_DIR/sync_backup.sh"    /usr/local/bin/sync_backup.sh
+cp "$SCRIPT_DIR/update_models.sh"  /usr/local/bin/update_models.sh
+chmod +x /usr/local/bin/wifi_manager.sh \
+         /usr/local/bin/sync_backup.sh \
+         /usr/local/bin/update_models.sh
 
 # Chave SSH para rsync sem senha
 SSH_KEY="/root/.ssh/wifi_manager_backup"
