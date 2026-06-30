@@ -23,7 +23,7 @@ cleanup() {
     systemctl stop dnsmasq 2>/dev/null || true
     _ap_iptables_del
     ip addr flush dev wlan0 2>/dev/null || true
-    nmcli device set wlan0 managed yes 2>/dev/null || true
+    _nm_manage_wlan0
 }
 trap cleanup EXIT SIGTERM SIGINT
 
@@ -61,19 +61,44 @@ _stop_hostapd() {
 
 # ── Estado AP ────────────────────────────────────────────────────────────────
 
+_nm_unmanage_wlan0() {
+    mkdir -p /etc/NetworkManager/conf.d
+    cat > /etc/NetworkManager/conf.d/99-ap-mode.conf << 'EOF'
+[keyfile]
+unmanaged-devices=interface-name:wlan0
+EOF
+    nmcli general reload conf
+    sleep 3
+}
+
+_nm_manage_wlan0() {
+    rm -f /etc/NetworkManager/conf.d/99-ap-mode.conf
+    nmcli general reload conf
+    sleep 3
+    rfkill unblock wifi 2>/dev/null || true
+    nmcli radio wifi on 2>/dev/null || true
+    nmcli device set wlan0 managed yes 2>/dev/null || true
+    ip link set wlan0 down 2>/dev/null || true
+    sleep 1
+    ip link set wlan0 up 2>/dev/null || true
+}
+
 _start_ap() {
     log "Iniciando modo AP..."
     nmcli device disconnect wlan0 2>/dev/null || true
-    nmcli device set wlan0 managed no
+    _nm_unmanage_wlan0
     rfkill unblock wifi 2>/dev/null || true
+    iw reg set BR 2>/dev/null || true
 
+    ip link set wlan0 down 2>/dev/null || true
+    sleep 1
     ip addr flush dev wlan0 2>/dev/null || true
     ip addr add 192.168.50.1/24 dev wlan0
     ip link set wlan0 up
 
     _ap_iptables_add
     _start_hostapd
-    sleep 2
+    sleep 3
     systemctl restart dnsmasq
     log "AP ativo — PiGaleria @ 192.168.50.1:8080"
 }
@@ -83,12 +108,14 @@ _stop_ap() {
     _stop_hostapd
     systemctl stop dnsmasq 2>/dev/null || true
     _ap_iptables_del
+    ip link set wlan0 down 2>/dev/null || true
     ip addr flush dev wlan0 2>/dev/null || true
-    sleep 1
+    _nm_manage_wlan0
+    sleep 2
 }
 
 _ap_client_count() {
-    iw dev wlan0 station dump 2>/dev/null | grep -c "^Station" || echo 0
+    iw dev wlan0 station dump 2>/dev/null | grep -c "^Station"
 }
 
 run_ap_state() {
@@ -133,9 +160,9 @@ run_ap_state() {
 # ── Estado WIFI_SCAN ─────────────────────────────────────────────────────────
 
 _enable_nm() {
+    nmcli device set wlan0 managed yes 2>/dev/null || true
     ip link set wlan0 up 2>/dev/null || true
-    nmcli device set wlan0 managed yes
-    sleep 3
+    sleep 5
 }
 
 _get_visible_ssids() {
@@ -155,7 +182,7 @@ _try_nm_saved() {
 
     # Lista conexões WiFi salvas no NM
     connections=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \
-        | grep ':wifi$' | cut -d: -f1)
+        | grep -E ':(wifi|802-11-wireless)$' | cut -d: -f1)
 
     [ -z "$connections" ] && return 1
 

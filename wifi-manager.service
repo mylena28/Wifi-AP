@@ -8,6 +8,8 @@ Type=simple
 ExecStart=/usr/local/bin/wifi_manager.sh
 Restart=always
 RestartSec=10
+TimeoutStopSec=30
+StartLimitIntervalSec=0
 StandardOutput=journal
 StandardError=journal
 
