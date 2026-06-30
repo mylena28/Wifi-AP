@@ -1,7 +1,7 @@
 # AppInstalacao — Wi-Fi Manager + Flask Image Gallery
 
 Acesse imagens do Raspberry Pi 5 pelo celular via Wi-Fi direto (modo AP).
-Quando disponível, o Pi conecta automaticamente a uma rede Wi-Fi conhecida para manter o acesso à internet.
+Quando disponível, o Pi conecta automaticamente a uma rede Wi-Fi conhecida para sincronizar backups e atualizar modelos.
 
 ---
 
@@ -33,14 +33,16 @@ Boot
                             ▼
 ┌──────────────────────────────────────────────────────┐
 │  WIFI CLIENT                                         │
-│  Sistema inteiro tem acesso à internet               │
+│  Ao conectar (e a cada 1h):                          │
+│  · sync_backup.sh  — rsync das imagens para Pi backup│
+│  · update_models.sh — git pull + docker rebuild dos  │
+│    projetos DrowsyDriving e FATIGUE se houver update │
 │  Checa conexão a cada 60s                            │
 │  · Perdeu conexão → WIFI SCAN (não volta ao AP)      │
 └──────────────────────────────────────────────────────┘
 ```
 
 > No modo AP a galeria está disponível em `http://192.168.50.1:8080`.
-> No modo cliente Wi-Fi a galeria não precisa estar acessível — o objetivo é internet.
 
 ---
 
@@ -54,13 +56,17 @@ Boot
 │    • wifi_manager.sh — máquina de estados                │
 │    • Modo AP: hostapd + dnsmasq + iptables               │
 │    • Modo cliente: NetworkManager (nmcli)                │
-│    • Lê redes de /etc/wifi_manager/networks.conf         │
+│    • Ao conectar: sync backup + update modelos           │
 │                                                          │
 │  [Docker: gallery]                                       │
 │    • Flask gallery na porta 8080                         │
 │    • Monta pasta de imagens (read-only)                  │
 │    • Monta /etc/wifi_manager (leitura e escrita)         │
 │    • restart: always → sobrevive reboots                 │
+│                                                          │
+│  [/mnt/nvme/DrowsyDriving]  [/mnt/nvme/FATIGUE]        │
+│    • Atualizados via git pull quando há internet         │
+│    • Container reconstruído automaticamente se mudou     │
 └──────────────────────────────────────────────────────────┘
           ▲ Wi-Fi (SSID: PiGaleria)
           │
@@ -78,12 +84,16 @@ Boot
 | `setup_pi.sh` | Roda **uma vez** — instala dependências, build Docker, ativa serviços |
 | `wifi_manager.sh` | Script principal — máquina de estados AP / WiFi scan / cliente |
 | `wifi-manager.service` | Serviço systemd do gerenciador Wi-Fi (sobe no boot) |
+| `sync_backup.sh` | Sincroniza imagens com o Pi backup via rsync/SSH |
+| `update_models.sh` | Atualiza DrowsyDriving e FATIGUE via git pull + docker |
+| `backup.conf` | Configuração do Pi de backup (IP, usuário, caminho, intervalo) |
 | `networks.conf` | Template do arquivo de redes conhecidas (instalado em `/etc/wifi_manager/`) |
 | `hostapd.conf` | Configuração do AP Wi-Fi (SSID, senha, canal) |
 | `dnsmasq_wifi.conf` | DHCP para a interface `wlan0` no modo AP |
 | `docker-compose.yml` | Definição do serviço Docker da galeria |
 | `Dockerfile` | Imagem Python + Flask |
 | `gallery.py` | Galeria Flask + página `/redes` para gerenciar redes |
+| `dev_mode.sh` | Para o AP e conecta ao WiFi manualmente (uso em desenvolvimento) |
 | `.env.example` | Template da pasta de imagens (copiado para `.env` pelo setup) |
 
 ---
@@ -95,15 +105,15 @@ Boot
 ### 1.1 Copiar a pasta para o Pi
 
 ```bash
-scp -r AppInstalacao/ pi@<ip-do-pi>:~/AppInstalacao/
+rsync -av --exclude='.git' AppInstalacao/ raspberrypi5@<ip-do-pi>:/mnt/nvme/AppInstalacao/
 ```
 
 ### 1.2 Rodar o script de setup
 
 ```bash
-cd ~/AppInstalacao
-chmod +x setup_pi.sh wifi_manager.sh
-sudo ./setup_pi.sh /caminho/para/sua/pasta/de/imagens
+cd /mnt/nvme/AppInstalacao
+chmod +x setup_pi.sh wifi_manager.sh dev_mode.sh
+sudo ./setup_pi.sh /mnt/nvme/DrowsyDriving/logs
 ```
 
 **O que esse script faz:**
@@ -111,8 +121,8 @@ sudo ./setup_pi.sh /caminho/para/sua/pasta/de/imagens
 - Instala `hostapd` e `dnsmasq`
 - Salva o caminho das imagens no `.env`
 - Faz o build da imagem Docker
-- Instala `wifi_manager.sh` em `/usr/local/bin/`
-- Cria `/etc/wifi_manager/networks.conf` (se não existir)
+- Instala `wifi_manager.sh`, `sync_backup.sh` e `update_models.sh` em `/usr/local/bin/`
+- Cria `/etc/wifi_manager/networks.conf` e `backup.conf` (se não existirem)
 - Ativa `wifi-manager.service` e `docker` no boot
 - Sobe o container e inicia o gerenciador Wi-Fi
 
@@ -173,49 +183,123 @@ As alterações são lidas na próxima vez que o gerenciador entrar no estado de
 
 ---
 
-## Alterar a pasta de imagens
+## Parte 5 — Sincronização de backup (requer segundo Pi)
+
+> **Pré-requisito:** ter um segundo Raspberry Pi disponível na mesma rede com IP fixo.
+
+Quando conectado ao Wi-Fi, o Pi sincroniza automaticamente a pasta de imagens para o Pi backup via rsync/SSH, sem deletar arquivos no destino.
+
+### 5.1 Configurar o `backup.conf` no Pi principal
 
 ```bash
-nano ~/AppInstalacao/.env
-# altere IMAGE_DIR=/novo/caminho
+sudo nano /etc/wifi_manager/backup.conf
+```
 
-cd ~/AppInstalacao
-docker compose restart
+Preencha os campos:
+```bash
+BACKUP_HOST=192.168.15.XX   # IP fixo do Pi backup
+BACKUP_USER=pi               # usuário SSH no Pi backup
+BACKUP_PATH=/home/pi/backup  # pasta destino no Pi backup
+BACKUP_INTERVAL=3600         # intervalo entre syncs em segundos (3600 = 1h)
+```
+
+### 5.2 Criar a chave SSH sem senha para o rsync
+
+No Pi principal (como root):
+```bash
+sudo ssh-keygen -t ed25519 -f /root/.ssh/wifi_manager_backup -N ""
+sudo ssh-copy-id -i /root/.ssh/wifi_manager_backup.pub pi@<ip-do-pi-backup>
+```
+
+Teste a conexão:
+```bash
+sudo ssh -i /root/.ssh/wifi_manager_backup pi@<ip-do-pi-backup> "echo OK"
+```
+
+### 5.3 Comportamento
+
+- Ao conectar ao Wi-Fi → sync imediato em background
+- A cada `BACKUP_INTERVAL` segundos enquanto conectado → novo sync
+- Se o sync já estiver rodando quando o intervalo chegar → chamada ignorada (lock file)
+- Se interrompido no meio → retoma de onde parou na próxima execução (`--partial`)
+- Se `BACKUP_HOST` estiver vazio → sync silenciosamente ignorado
+
+Acompanhar os logs:
+```bash
+journalctl -fu wifi-manager.service | grep backup
 ```
 
 ---
 
-## Alterar SSID ou senha do AP
+## Parte 6 — Atualização automática de modelos
 
+Ao conectar ao Wi-Fi, o Pi verifica se há commits novos nos repositórios dos projetos e atualiza automaticamente se houver.
+
+**Projetos monitorados:**
+- `/mnt/nvme/DrowsyDriving` — branch `main`
+- `/mnt/nvme/FATIGUE` — branch `main`
+
+### Comportamento
+
+- Ao conectar ao Wi-Fi → verificação imediata em background
+- A cada 1 hora enquanto conectado → nova verificação
+- Se não houver commits novos → loga "já está na versão mais recente" e termina
+- Se houver commits novos:
+  1. `git pull origin main`
+  2. `docker compose build`
+  3. `docker compose up -d`
+
+Acompanhar os logs:
 ```bash
-sudo nano /etc/hostapd/hostapd.conf
-# altere ssid= e wpa_passphrase=
+journalctl -fu wifi-manager.service | grep update
+```
 
-sudo systemctl restart wifi-manager
+### Adicionar ou remover projetos monitorados
+
+Edite o array `PROJECTS` em `/usr/local/bin/update_models.sh`:
+```bash
+PROJECTS=(
+    "/mnt/nvme/DrowsyDriving"
+    "/mnt/nvme/FATIGUE"
+    "/mnt/nvme/OutroProjeto"   # adicione aqui
+)
 ```
 
 ---
 
 ## Desativar o AP e conectar ao Wi-Fi manualmente
 
-Útil para acessar o Pi pela rede local (ex: para atualizar o código via SSH).
+Útil para acessar o Pi pela rede local (ex: atualizar código via SSH).
 
 ```bash
-# 1. Parar o serviço de AP
-sudo systemctl stop wifi-ap.service
-
-# 2. Devolver controle da interface ao NetworkManager
-sudo nmcli device set wlan0 managed yes
-
-# 3. Conectar à rede desejada
-sudo nmcli device wifi connect "NOME_DA_REDE" password "SENHA"
+sudo ./dev_mode.sh SALTE
+# ou: sudo ./dev_mode.sh "Nome da Rede"
 ```
 
-> Após conectar, descubra o IP do Pi com `hostname -I` e reconecte via SSH antes de fechar a sessão atual.
-
-Para restaurar o AP, basta reiniciar o serviço:
+Descubra o IP após conectar:
 ```bash
-sudo systemctl start wifi-ap.service
+hostname -I
+```
+
+Para restaurar o AP:
+```bash
+sudo systemctl start wifi-manager.service
+```
+
+---
+
+## Atualizar o código no Pi
+
+```bash
+# No computador local:
+rsync -av wifi_manager.sh update_models.sh sync_backup.sh dev_mode.sh \
+  raspberrypi5@<ip-do-pi>:/mnt/nvme/AppInstalacao/
+
+# No Pi:
+sudo cp /mnt/nvme/AppInstalacao/wifi_manager.sh  /usr/local/bin/wifi_manager.sh
+sudo cp /mnt/nvme/AppInstalacao/update_models.sh /usr/local/bin/update_models.sh
+sudo cp /mnt/nvme/AppInstalacao/sync_backup.sh   /usr/local/bin/sync_backup.sh
+sudo systemctl restart wifi-manager.service
 ```
 
 ---
@@ -227,23 +311,29 @@ sudo systemctl start wifi-ap.service
 journalctl -fu wifi-manager.service
 
 # Status geral
-systemctl status wifi-manager
-docker compose -f ~/AppInstalacao/docker-compose.yml ps
+systemctl status wifi-manager.service
+docker ps
 
 # Logs do container Flask
 docker logs gallery
 
 # Forçar reinício do gerenciador Wi-Fi
-sudo systemctl restart wifi-manager
+sudo systemctl restart wifi-manager.service
 
 # Forçar reinício do container
-docker compose -f ~/AppInstalacao/docker-compose.yml restart
+cd /mnt/nvme/AppInstalacao && docker compose restart
 
 # Ver clientes conectados ao AP
 iw dev wlan0 station dump
 
 # Ver rede Wi-Fi atual (modo cliente)
 nmcli device show wlan0
+
+# Rodar update dos modelos manualmente
+sudo /usr/local/bin/update_models.sh
+
+# Rodar sync de backup manualmente
+sudo /usr/local/bin/sync_backup.sh
 ```
 
 ---
@@ -256,11 +346,14 @@ nmcli device show wlan0
 | Browser não alcança `192.168.50.1` | `ip addr show wlan0` — deve mostrar `192.168.50.1/24` |
 | Celular conecta mas não recebe IP | `sudo systemctl restart dnsmasq` |
 | Pi não conecta ao Wi-Fi conhecido | Verificar `/etc/wifi_manager/networks.conf` — SSID e senha corretos? |
-| Pi ficou preso em WIFI_SCAN | `sudo systemctl restart wifi-manager` para reiniciar o ciclo |
+| Pi ficou preso em WIFI_SCAN | `sudo systemctl restart wifi-manager.service` para reiniciar o ciclo |
 | Galeria abre vazia | Verificar `IMAGE_DIR` no `.env` e reiniciar o container |
 | Página `/redes` retorna 403 | Você não está conectado ao AP — essa página só funciona via PiGaleria |
 | Container não inicia | `docker logs gallery` para ver o erro |
-| Serviço não sobe no boot | `journalctl -u wifi-manager -n 50` |
+| wlan0 aparece "não disponível" | `sudo nmcli radio wifi on && sudo rfkill unblock all` |
+| Wi-Fi não volta após dev_mode.sh | `sudo nmcli radio wifi on` — pode ter sido desativado manualmente |
+| Sync não executa | Verificar `BACKUP_HOST` em `/etc/wifi_manager/backup.conf` |
+| Update dos modelos não executa | `sudo /usr/local/bin/update_models.sh` para ver o erro manualmente |
 
 ---
 
