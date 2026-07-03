@@ -42,14 +42,15 @@ if [ ! -d "$IMAGE_DIR" ]; then
 fi
 
 DEST="${BACKUP_USER}@${BACKUP_HOST}:${BACKUP_PATH}/"
+BACKUP_PORT="${BACKUP_PORT:-22}"
 
-log "Iniciando sync: $IMAGE_DIR → $DEST"
+log "Iniciando sync: $IMAGE_DIR → $DEST (porta $BACKUP_PORT)"
 
 rsync -az \
     --no-delete \
     --partial \
     --timeout=30 \
-    -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10" \
+    -e "ssh -p $BACKUP_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10" \
     "$IMAGE_DIR/" \
     "$DEST" 2>&1 | tee -a "$LOG"
 

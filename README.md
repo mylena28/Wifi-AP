@@ -197,7 +197,8 @@ sudo nano /etc/wifi_manager/backup.conf
 
 Preencha os campos:
 ```bash
-BACKUP_HOST=192.168.15.XX   # IP fixo do Pi backup
+BACKUP_HOST=192.168.15.XX   # IP ou hostname do Pi backup
+BACKUP_PORT=22                # porta SSH no Pi backup (padrão 22)
 BACKUP_USER=pi               # usuário SSH no Pi backup
 BACKUP_PATH=/home/pi/backup  # pasta destino no Pi backup
 BACKUP_INTERVAL=3600         # intervalo entre syncs em segundos (3600 = 1h)
@@ -208,12 +209,12 @@ BACKUP_INTERVAL=3600         # intervalo entre syncs em segundos (3600 = 1h)
 No Pi principal (como root):
 ```bash
 sudo ssh-keygen -t ed25519 -f /root/.ssh/wifi_manager_backup -N ""
-sudo ssh-copy-id -i /root/.ssh/wifi_manager_backup.pub pi@<ip-do-pi-backup>
+sudo ssh-copy-id -i /root/.ssh/wifi_manager_backup.pub -p <porta> pi@<ip-do-pi-backup>
 ```
 
 Teste a conexão:
 ```bash
-sudo ssh -i /root/.ssh/wifi_manager_backup pi@<ip-do-pi-backup> "echo OK"
+sudo ssh -i /root/.ssh/wifi_manager_backup -p <porta> pi@<ip-do-pi-backup> "echo OK"
 ```
 
 ### 5.3 Comportamento
