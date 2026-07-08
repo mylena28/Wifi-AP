@@ -237,8 +237,8 @@ journalctl -fu wifi-manager.service | grep backup
 Ao conectar ao Wi-Fi, o Pi verifica se há commits novos nos repositórios dos projetos e atualiza automaticamente se houver.
 
 **Projetos monitorados:**
-- `/mnt/nvme/DrowsyDriving` — branch `main`
-- `/mnt/nvme/FATIGUE` — branch `main`
+- `/mnt/nvme/Monitoramento/DrowsyDriving` — branch `main`
+- `/mnt/nvme/Monitoramento/FATIGUE` — branch `main`
 
 ### Comportamento
 

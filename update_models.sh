@@ -3,8 +3,8 @@
 # Chamado pelo wifi_manager.sh quando conectado à internet.
 
 PROJECTS=(
-    "/mnt/nvme/DrowsyDriving"
-    "/mnt/nvme/FATIGUE"
+    "/mnt/nvme/Monitoramento/DrowsyDriving"
+    "/mnt/nvme/Monitoramento/FATIGUE"
 )
 
 LOG="/var/log/wifi_manager.log"
