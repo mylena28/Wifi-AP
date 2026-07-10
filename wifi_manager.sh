@@ -334,6 +334,11 @@ main() {
     log " wifi_manager iniciado"
     log "======================================="
 
+    # Permite sobrescrever AP_TIMEOUT/CHECK_AP_INTERVAL/CHECK_WIFI_INTERVAL/
+    # BACKUP_INTERVAL via backup.conf desde o boot, sem precisar entrar em
+    # modo cliente primeiro.
+    [ -f "$BACKUP_CONF" ] && source "$BACKUP_CONF" 2>/dev/null || true
+
     while true; do
         case "$state" in
         AP)          run_ap_state ;;

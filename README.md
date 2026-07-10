@@ -102,16 +102,20 @@ Boot
 
 > Requer teclado/monitor ou acesso SSH. Feito apenas uma vez.
 
-### 1.1 Copiar a pasta para o Pi
+### 1.1 Clonar o repositório no Pi
 
 ```bash
-rsync -av --exclude='.git' AppInstalacao/ raspberrypi5@<ip-do-pi>:/mnt/nvme/AppInstalacao/
+git clone git@github.com:mylena28/Wifi-AP.git /mnt/nvme/Wifi-AP
 ```
+
+> A partir daqui o código no Pi vive nesse clone git — atualizações
+> seguintes não precisam mais de `rsync` manual, ver
+> [Atualizar o código no Pi](#atualizar-o-código-no-pi).
 
 ### 1.2 Rodar o script de setup
 
 ```bash
-cd /mnt/nvme/AppInstalacao
+cd /mnt/nvme/Wifi-AP
 chmod +x setup_pi.sh wifi_manager.sh dev_mode.sh
 sudo ./setup_pi.sh /mnt/nvme/DrowsyDriving/logs
 ```
@@ -266,6 +270,12 @@ PROJECTS=(
 )
 ```
 
+> O próprio repositório Wifi-AP (`/mnt/nvme/Wifi-AP`) **não** faz parte desse
+> array — ele é atualizado por um fluxo separado dentro do
+> `update_models.sh` (ver [Atualizar o código no Pi](#atualizar-o-código-no-pi)),
+> porque além de `git pull` + rebuild ele também reinstala os scripts em
+> `/usr/local/bin` e reinicia o `wifi-manager.service`.
+
 ---
 
 ## Desativar o AP e conectar ao Wi-Fi manualmente
@@ -291,15 +301,32 @@ sudo systemctl start wifi-manager.service
 
 ## Atualizar o código no Pi
 
-```bash
-# No computador local:
-rsync -av wifi_manager.sh update_models.sh sync_backup.sh dev_mode.sh \
-  raspberrypi5@<ip-do-pi>:/mnt/nvme/AppInstalacao/
+**Automático:** ao conectar ao Wi-Fi (e a cada 1h enquanto conectado), o
+`update_models.sh` também verifica commits novos em `/mnt/nvme/Wifi-AP`
+(clonado no [setup inicial](#11-clonar-o-repositório-no-pi)). Se houver
+atualização:
+1. `git pull origin main`
+2. reinstala `wifi_manager.sh`, `sync_backup.sh` e `update_models.sh` em
+   `/usr/local/bin/`
+3. `docker compose build && docker compose up -d` (container da galeria)
+4. agenda restart do `wifi-manager.service`
 
-# No Pi:
-sudo cp /mnt/nvme/AppInstalacao/wifi_manager.sh  /usr/local/bin/wifi_manager.sh
-sudo cp /mnt/nvme/AppInstalacao/update_models.sh /usr/local/bin/update_models.sh
-sudo cp /mnt/nvme/AppInstalacao/sync_backup.sh   /usr/local/bin/sync_backup.sh
+Isso só roda enquanto o Pi está em modo cliente Wi-Fi — nunca durante o modo
+AP com alguém conectado na galeria. Acompanhar:
+```bash
+journalctl -fu wifi-manager.service | grep update
+```
+
+**Manual** (sem esperar o Pi conectar, ou para forçar uma atualização
+imediata — requer SSH, ver
+[Desativar o AP e conectar ao Wi-Fi manualmente](#desativar-o-ap-e-conectar-ao-wi-fi-manualmente)):
+```bash
+cd /mnt/nvme/Wifi-AP
+git pull origin main
+sudo cp wifi_manager.sh  /usr/local/bin/wifi_manager.sh
+sudo cp update_models.sh /usr/local/bin/update_models.sh
+sudo cp sync_backup.sh   /usr/local/bin/sync_backup.sh
+docker compose build && docker compose up -d
 sudo systemctl restart wifi-manager.service
 ```
 
@@ -322,7 +349,7 @@ docker logs gallery
 sudo systemctl restart wifi-manager.service
 
 # Forçar reinício do container
-cd /mnt/nvme/AppInstalacao && docker compose restart
+cd /mnt/nvme/Wifi-AP && docker compose restart
 
 # Ver clientes conectados ao AP
 iw dev wlan0 station dump
