@@ -64,9 +64,11 @@ Boot
 │    • Monta /etc/wifi_manager (leitura e escrita)         │
 │    • restart: always → sobrevive reboots                 │
 │                                                          │
-│  [/mnt/nvme/DrowsyDriving]  [/mnt/nvme/FATIGUE]        │
+│  [/mnt/nvme/Monitoramento/DrowsyDriving]  [.../FATIGUE]  │
 │    • Atualizados via git pull quando há internet         │
 │    • Container reconstruído automaticamente se mudou     │
+│    • Toda a pasta /mnt/nvme/Monitoramento é o IMAGE_DIR: │
+│      galeria (AP) + backup (rsync) enxergam tudo aqui    │
 └──────────────────────────────────────────────────────────┘
           ▲ Wi-Fi (SSID: PiGaleria)
           │
@@ -87,6 +89,7 @@ Boot
 | `sync_backup.sh` | Sincroniza imagens com o Pi backup via rsync/SSH |
 | `update_models.sh` | Atualiza DrowsyDriving e FATIGUE via git pull + docker |
 | `backup.conf` | Configuração do Pi de backup (IP, usuário, caminho, intervalo) |
+| `rsync_filter.conf` | Filtro do rsync — o que enviar de cada projeto no backup |
 | `networks.conf` | Template do arquivo de redes conhecidas (instalado em `/etc/wifi_manager/`) |
 | `hostapd.conf` | Configuração do AP Wi-Fi (SSID, senha, canal) |
 | `dnsmasq_wifi.conf` | DHCP para a interface `wlan0` no modo AP |
@@ -117,8 +120,14 @@ git clone git@github.com:mylena28/Wifi-AP.git /mnt/nvme/Wifi-AP
 ```bash
 cd /mnt/nvme/Wifi-AP
 chmod +x setup_pi.sh wifi_manager.sh dev_mode.sh
-sudo ./setup_pi.sh /mnt/nvme/DrowsyDriving/logs
+sudo ./setup_pi.sh /mnt/nvme/Monitoramento
 ```
+
+> `/mnt/nvme/Monitoramento` é a pasta inteira dos projetos
+> (`DrowsyDriving`, `FATIGUE`, futuros projetos) — tudo dentro dela é
+> exposto na galeria via AP **e** sincronizado para o Pi backup via
+> rsync. O repositório `Wifi-AP` fica fora dessa árvore, como irmão dela
+> (`/mnt/nvme/Wifi-AP`, não `/mnt/nvme/Monitoramento/Wifi-AP`).
 
 **O que esse script faz:**
 - Remove serviços antigos (Bluetooth PAN, wifi-ap)
@@ -191,7 +200,16 @@ As alterações são lidas na próxima vez que o gerenciador entrar no estado de
 
 > **Pré-requisito:** ter um segundo Raspberry Pi disponível na mesma rede com IP fixo.
 
-Quando conectado ao Wi-Fi, o Pi sincroniza automaticamente a pasta de imagens para o Pi backup via rsync/SSH, sem deletar arquivos no destino.
+Quando conectado ao Wi-Fi, o Pi sincroniza automaticamente a pasta de imagens (`IMAGE_DIR`, `/mnt/nvme/Monitoramento`) para o Pi backup via rsync/SSH, sem deletar arquivos no destino.
+
+> A galeria (AP) mostra `IMAGE_DIR` inteiro, mas o backup é filtrado por
+> `/etc/wifi_manager/rsync_filter.conf`: de cada projeto dentro de
+> `Monitoramento/`, só a subpasta `logs/` é enviada — código-fonte
+> (`*.py`) e `.git/` nunca saem do Pi principal. Editar esse arquivo pra
+> mudar o que é sincronizado:
+> ```bash
+> sudo nano /etc/wifi_manager/rsync_filter.conf
+> ```
 
 ### 5.1 Configurar o `backup.conf` no Pi principal
 
@@ -264,11 +282,16 @@ journalctl -fu wifi-manager.service | grep update
 Edite o array `PROJECTS` em `/usr/local/bin/update_models.sh`:
 ```bash
 PROJECTS=(
-    "/mnt/nvme/DrowsyDriving"
-    "/mnt/nvme/FATIGUE"
-    "/mnt/nvme/OutroProjeto"   # adicione aqui
+    "/mnt/nvme/Monitoramento/DrowsyDriving"
+    "/mnt/nvme/Monitoramento/FATIGUE"
+    "/mnt/nvme/Monitoramento/OutroProjeto"   # adicione aqui
 )
 ```
+
+> Isso só controla o `git pull` + rebuild do container de cada projeto —
+> não afeta o que aparece na galeria nem o que é sincronizado pelo
+> backup, já que ambos enxergam `/mnt/nvme/Monitoramento` inteiro
+> independente desse array (ver [Parte 5](#parte-5--sincronização-de-backup-requer-segundo-pi)).
 
 > O próprio repositório Wifi-AP (`/mnt/nvme/Wifi-AP`) **não** faz parte desse
 > array — ele é atualizado por um fluxo separado dentro do
@@ -329,6 +352,15 @@ sudo cp sync_backup.sh   /usr/local/bin/sync_backup.sh
 docker compose build && docker compose up -d
 sudo systemctl restart wifi-manager.service
 ```
+
+> Arquivos de configuração novos em `/etc/wifi_manager/` (ex.:
+> `rsync_filter.conf`) **não** são copiados automaticamente — nem pelo
+> update automático nem pelo comando acima, só o `setup_pi.sh` cria (e só
+> se ainda não existir). Se um Pi já configurado não tiver um arquivo
+> novo, copie manualmente uma vez:
+> ```bash
+> sudo cp /mnt/nvme/Wifi-AP/rsync_filter.conf /etc/wifi_manager/rsync_filter.conf
+> ```
 
 ---
 

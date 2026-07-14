@@ -19,14 +19,25 @@ convenções de código e decisões de projeto que não estão no README.
   camadas ao propor mudanças.
 - Arquivos instalados em `/usr/local/bin/` (`wifi_manager.sh`,
   `sync_backup.sh`, `update_models.sh`) e `/etc/wifi_manager/`
-  (`networks.conf`, `backup.conf`, `.env`) são **cópias** do repo — editar
-  sempre o arquivo no repo e reinstalar (ver seção "Atualizar o código no
-  Pi" do README), nunca editar a cópia instalada diretamente.
+  (`networks.conf`, `backup.conf`, `rsync_filter.conf`, `.env`) são
+  **cópias** do repo — editar sempre o arquivo no repo e reinstalar (ver
+  seção "Atualizar o código no Pi" do README), nunca editar a cópia
+  instalada diretamente.
 - `PROJECTS` em `update_models.sh` está fixo em
   `/mnt/nvme/Monitoramento/DrowsyDriving` e
   `/mnt/nvme/Monitoramento/FATIGUE` — mudou de `/mnt/nvme/<Projeto>` para
   esse layout (commit `cfd6740`); não reverter sem confirmar com o
   usuário que o path mudou de novo.
+- `IMAGE_DIR` (`.env`) é `/mnt/nvme/Monitoramento` inteiro — tudo dentro
+  dessa pasta (incluindo os repos `DrowsyDriving`/`FATIGUE` acima) é
+  montado read-only na galeria; não é um subdiretório tipo
+  `.../DrowsyDriving/logs`. `Wifi-AP` fica **fora** dessa árvore, como
+  irmão dela: `/mnt/nvme/Wifi-AP`, não `/mnt/nvme/Monitoramento/Wifi-AP`.
+- O que a galeria mostra (tudo em `IMAGE_DIR`) e o que o `sync_backup.sh`
+  envia pro Pi backup são coisas diferentes: o rsync usa
+  `rsync_filter.conf` (`/etc/wifi_manager/rsync_filter.conf`) pra mandar
+  só a subpasta `logs/` de cada projeto, ignorando `.py` e `.git/` — a
+  galeria não usa esse filtro, continua servindo `IMAGE_DIR` inteiro.
 
 ## Code style — shell (`*.sh`)
 

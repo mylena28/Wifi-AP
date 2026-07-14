@@ -4,6 +4,7 @@
 
 BACKUP_CONF="/etc/wifi_manager/backup.conf"
 ENV_FILE="/etc/wifi_manager/.env"
+FILTER_FILE="/etc/wifi_manager/rsync_filter.conf"
 SSH_KEY="/root/.ssh/wifi_manager_backup"
 LOG="/var/log/wifi_manager.log"
 LOCK="/var/run/sync_backup.lock"
@@ -50,6 +51,13 @@ BACKUP_PORT="${BACKUP_PORT:-22}"
 SYNC_MAX_RETRIES="${SYNC_MAX_RETRIES:-3}"
 SYNC_RETRY_DELAY="${SYNC_RETRY_DELAY:-90}"
 
+FILTER_ARGS=()
+if [ -f "$FILTER_FILE" ]; then
+    FILTER_ARGS=(--prune-empty-dirs --filter="merge $FILTER_FILE")
+else
+    log "rsync_filter.conf não encontrado ($FILTER_FILE) — sincronizando $IMAGE_DIR sem filtro."
+fi
+
 log "Iniciando sync: $IMAGE_DIR → $DEST (porta $BACKUP_PORT)"
 
 success=false
@@ -57,6 +65,7 @@ for attempt in $(seq 1 "$SYNC_MAX_RETRIES"); do
     rsync -az \
         --partial \
         --timeout=30 \
+        "${FILTER_ARGS[@]}" \
         -e "ssh -p $BACKUP_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10" \
         "$IMAGE_DIR/" \
         "$DEST" 2>&1 | tee -a "$LOG"

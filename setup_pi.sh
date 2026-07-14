@@ -82,6 +82,15 @@ else
 fi
 chmod 664 /etc/wifi_manager/backup.conf
 
+# Filtro do rsync (o que enviar de cada projeto no backup)
+if [ ! -f /etc/wifi_manager/rsync_filter.conf ]; then
+    cp "$SCRIPT_DIR/rsync_filter.conf" /etc/wifi_manager/rsync_filter.conf
+    echo "  rsync_filter.conf criado em /etc/wifi_manager/"
+else
+    echo "  rsync_filter.conf já existe — mantendo configuração atual."
+fi
+chmod 664 /etc/wifi_manager/rsync_filter.conf
+
 # Copia o .env para /etc/wifi_manager/ para o sync_backup.sh ler
 cp "$SCRIPT_DIR/.env" /etc/wifi_manager/.env
 
