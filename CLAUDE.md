@@ -101,6 +101,9 @@ convenções de código e decisões de projeto que não estão no README.
 - Mensagem do commit curta e concisa — poucas palavras, separadas por `-`
   (ex.: `add: retry-sync-backup`, `fix: timeout-ap-configuravel`).
 - Nunca commitar sem pedido explícito do usuário.
+- Nunca incluir linhas de atribuição de IA/colaboração (`Co-Authored-By:
+  Claude...`, `Claude-Session: ...` ou similar) em commits, branches ou
+  PRs — só a mensagem do próprio usuário, sem rodapé de assinatura.
 
 ## Antes de reportar "pronto"
 
